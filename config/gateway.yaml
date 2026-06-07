@@ -109,7 +109,7 @@ rate_limit:
   per_model: 100
 
 cache:
-  enabled: false
+  enabled: true
   backend: memory          # memory | redis
   ttl: 1h
   strategy: exact          # exact | semantic

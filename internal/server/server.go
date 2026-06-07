@@ -234,6 +234,8 @@ func (s *Server) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	}
 	span.SetAttributes(otelAttrString("llm.model", req.Model), otelAttrBool("llm.stream", req.Stream))
 
+	recordReq()
+
 	if req.Stream {
 		recordStream()
 		s.handleStreamCompletion(w, r, &req)

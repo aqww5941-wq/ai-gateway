@@ -23,14 +23,16 @@ type AdminStats struct {
 
 var stats AdminStats
 
+func recordReq() {
+	stats.TotalReqs.Add(1)
+}
+
 func recordHit() {
 	stats.CacheHits.Add(1)
-	stats.TotalReqs.Add(1)
 	metrics.CacheHitsTotal.WithLabelValues("hit").Inc()
 }
 func recordMiss() {
 	stats.CacheMisses.Add(1)
-	stats.TotalReqs.Add(1)
 	metrics.CacheHitsTotal.WithLabelValues("miss").Inc()
 }
 func recordError() {
