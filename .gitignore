@@ -1,0 +1,9 @@
+.idea/
+.vscode/
+
+.env
+
+tmp/
+bin/
+.claude/
+*.exe

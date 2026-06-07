@@ -1,0 +1,73 @@
+server:
+  port: 8080
+  read_timeout: 30s
+  write_timeout: 120s
+
+auth:
+  enabled: false
+  keys: []
+
+providers:
+  - name: openai
+    type: openai
+    api_key: ${OPENAI_API_KEY}
+    base_url: https://api.openai.com/v1
+    models:
+      - gpt-4o
+      - gpt-4o-mini
+    priority: 1
+    max_retries: 2
+    timeout: 60s
+
+  - name: deepseek
+    type: openai
+    api_key: ${DEEPSEEK_API_KEY}
+    base_url: https://api.deepseek.com/v1
+    models:
+      - deepseek-chat
+      - deepseek-reasoner
+    priority: 2
+
+routes:
+  - name: cheap-first
+    match:
+      model: gpt-4o-mini
+    strategy: weighted
+    targets:
+      - provider: openai
+        model: gpt-4o-mini
+        weight: 50
+      - provider: deepseek
+        model: deepseek-chat
+        weight: 50
+
+  - name: smart-route
+    match:
+      model: auto
+    strategy: semantic
+    targets: []
+    semantic_rules:
+      - complexity: simple
+        target:
+          provider: deepseek
+          model: deepseek-chat
+      - complexity: complex
+        target:
+          provider: openai
+          model: gpt-4o
+
+rate_limit:
+  enabled: false
+  per_key: 60
+  per_model: 100
+
+cache:
+  enabled: false
+  backend: memory          # memory | redis
+  ttl: 1h
+  strategy: exact          # exact | semantic
+  max_size: 1000
+  threshold: 0.85          # similarity threshold for semantic cache
+  redis_addr: localhost:6379
+  redis_pass: ""
+  redis_db: 0
