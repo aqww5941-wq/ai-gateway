@@ -22,9 +22,11 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
+	"strings"
 	"sync"
 	"time"
 
+	"ai-gateway/config"
 	"ai-gateway/internal/provider"
 )
 
@@ -266,6 +268,70 @@ func (s *LatencyStrategy) Select(ctx context.Context, req *provider.ChatRequest,
 // a Get method that returns this if the matched route uses LatencyStrategy.
 type LatencyObserver interface {
 	Observe(t Target, d time.Duration, failed bool)
+}
+
+// LatencySnapshot is a read-only view of one tracker for the admin API.
+type LatencySnapshot struct {
+	Provider    string  `json:"provider"`
+	Model       string  `json:"model"`
+	P99Ms       float64 `json:"p99_ms"`
+	FailureRate float64 `json:"failure_rate"`
+	Samples     int     `json:"samples"`
+}
+
+// Snapshot returns the current state of every tracker in this strategy.
+func (s *LatencyStrategy) Snapshot() []LatencySnapshot {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]LatencySnapshot, 0, len(s.trackers))
+	for key, tr := range s.trackers {
+		parts := strings.SplitN(key, "/", 2)
+		prov, model := parts[0], ""
+		if len(parts) > 1 {
+			model = parts[1]
+		}
+		out = append(out, LatencySnapshot{
+			Provider:    prov,
+			Model:       model,
+			P99Ms:       float64(tr.P99()) / float64(time.Millisecond),
+			FailureRate: tr.FailureRate(),
+			Samples:     tr.Samples(),
+		})
+	}
+	return out
+}
+
+// RouteLatencySnapshot bundles a route's latency data for the admin API.
+type RouteLatencySnapshot struct {
+	Model     string            `json:"model"`
+	RouteName string            `json:"route_name"`
+	Targets   []LatencySnapshot `json:"targets"`
+}
+
+// LatencySnapshots returns latency snapshots for all routes using a
+// LatencyStrategy, keyed by client model name.
+func (r *Router) LatencySnapshots(configs []config.RouteConfig) []RouteLatencySnapshot {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]RouteLatencySnapshot, 0)
+	for _, rc := range configs {
+		entry, ok := r.routes[rc.Match.Model]
+		if !ok {
+			continue
+		}
+		ls, ok := entry.strategy.(*LatencyStrategy)
+		if !ok {
+			continue
+		}
+		if snap := ls.Snapshot(); len(snap) > 0 {
+			out = append(out, RouteLatencySnapshot{
+				Model:     rc.Match.Model,
+				RouteName: rc.Name,
+				Targets:   snap,
+			})
+		}
+	}
+	return out
 }
 
 // LatencyStrategyFor returns the LatencyStrategy attached to the route for

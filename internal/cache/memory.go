@@ -171,9 +171,10 @@ func (c *MemoryCache) Len() int {
 }
 
 type CacheEntryInfo struct {
-	Key        string
-	ExpiresAt  time.Time
-	TokenCount int
+	Key        string    `json:"key"`
+	Model      string    `json:"model"`
+	ExpiresAt  time.Time `json:"expires_at"`
+	TokenCount int       `json:"token_count"`
 }
 
 func (c *MemoryCache) Info() []CacheEntryInfo {
@@ -183,10 +184,42 @@ func (c *MemoryCache) Info() []CacheEntryInfo {
 	for elem := c.lru.Front(); elem != nil; elem = elem.Next() {
 		entry := elem.Value.(*cacheEntry)
 		infos = append(infos, CacheEntryInfo{
-			Key:        entry.key[:16],
+			Key:        entry.key,
+			Model:      entry.response.Model,
 			ExpiresAt:  entry.expiresAt,
 			TokenCount: entry.response.Usage.TotalTokens,
 		})
 	}
 	return infos
+}
+
+// CacheEntryDetail is the full cache entry including the response body.
+type CacheEntryDetail struct {
+	Key        string                  `json:"key"`
+	Model      string                  `json:"model"`
+	ExpiresAt  time.Time               `json:"expires_at"`
+	TokenCount int                     `json:"token_count"`
+	Response   *provider.ChatResponse  `json:"response"`
+}
+
+// Entry returns the full detail for a single cache key, or false if not found.
+func (c *MemoryCache) Entry(key string) (*CacheEntryDetail, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	elem, ok := c.entries[key]
+	if !ok {
+		return nil, false
+	}
+	entry := elem.Value.(*cacheEntry)
+	if time.Now().After(entry.expiresAt) {
+		c.removeElement(elem)
+		return nil, false
+	}
+	return &CacheEntryDetail{
+		Key:        entry.key,
+		Model:      entry.response.Model,
+		ExpiresAt:  entry.expiresAt,
+		TokenCount: entry.response.Usage.TotalTokens,
+		Response:   entry.response,
+	}, true
 }

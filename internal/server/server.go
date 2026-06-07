@@ -309,10 +309,10 @@ func (s *Server) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Store in cache
+	// Store in cache — use sfKey (computed before routing mutated req.Model)
+	// so lookup and storage always use the same key.
 	if s.cacheBackend != nil && resp != nil {
-		cacheKey := cache.CacheKey(&req)
-		s.cacheBackend.Set(cacheKey, resp)
+		s.cacheBackend.Set(sfKey, resp)
 		if s.semanticCache != nil {
 			s.semanticCache.SetWithEmbedding(&req, resp)
 		}
@@ -499,9 +499,10 @@ func (s *Server) handleStreamCompletion(w http.ResponseWriter, r *http.Request, 
 	defer span.End()
 
 	// 1. Cache replay — exact match first, then semantic.
+	// Save original model for cache key — routing will mutate req.Model.
+	origCacheKey := cache.CacheKey(req)
 	if s.cacheBackend != nil {
-		key := cache.CacheKey(req)
-		if resp, hit := s.cacheBackend.Get(key); hit {
+		if resp, hit := s.cacheBackend.Get(origCacheKey); hit {
 			recordHit()
 			s.logger.Info("stream cache hit", "model", req.Model)
 			s.replayCachedAsStream(w, resp)
@@ -644,6 +645,8 @@ func (s *Server) handleStreamCompletion(w http.ResponseWriter, r *http.Request, 
 	<-collectorDone
 
 	// 8. Cache the fully assembled response.
+	// Use origCacheKey (computed before routing mutated req.Model) so
+	// lookup and storage always use the same key.
 	if s.cacheBackend != nil && fullContent.Len() > 0 {
 		cachedResp := &provider.ChatResponse{
 			ID:      "cached",
@@ -666,8 +669,7 @@ func (s *Server) handleStreamCompletion(w http.ResponseWriter, r *http.Request, 
 				TotalTokens:      promptTokens + completionTokens,
 			},
 		}
-		cacheKey := cache.CacheKey(req)
-		s.cacheBackend.Set(cacheKey, cachedResp)
+		s.cacheBackend.Set(origCacheKey, cachedResp)
 		if s.semanticCache != nil {
 			s.semanticCache.SetWithEmbedding(req, cachedResp)
 		}

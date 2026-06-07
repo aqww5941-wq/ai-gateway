@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"sync/atomic"
+	"time"
 
 	"ai-gateway/internal/cache"
 	"ai-gateway/internal/metrics"
+	"ai-gateway/internal/static"
 )
 
 type AdminHandler struct {
@@ -22,6 +24,7 @@ type AdminStats struct {
 }
 
 var stats AdminStats
+var startTime = time.Now()
 
 func recordReq() {
 	stats.TotalReqs.Add(1)
@@ -47,9 +50,22 @@ func (s *Server) adminRoutes() *http.ServeMux {
 	mux := http.NewServeMux()
 	ah := &AdminHandler{server: s}
 
+	// Legacy endpoints
 	mux.HandleFunc("GET /admin/health", ah.handleHealth)
 	mux.HandleFunc("GET /admin/routes", ah.handleRoutes)
 	mux.HandleFunc("GET /admin/cache", ah.handleCache)
+
+	// v1 API
+	mux.HandleFunc("GET /admin/api/v1/overview", s.handleAdminOverview)
+	mux.HandleFunc("GET /admin/api/v1/breakers", s.handleAdminBreakers)
+	mux.HandleFunc("GET /admin/api/v1/providers", s.handleAdminProviders)
+	mux.HandleFunc("GET /admin/api/v1/latency", s.handleAdminLatency)
+	mux.HandleFunc("GET /admin/api/v1/routes", s.handleAdminRoutesV1)
+	mux.HandleFunc("GET /admin/api/v1/cache", s.handleAdminCacheV1)
+	mux.HandleFunc("GET /admin/api/v1/cache/entries/", s.handleAdminCacheEntry)
+
+	// React SPA
+	mux.Handle("/admin/dashboard/", static.SPAHandler())
 
 	return mux
 }

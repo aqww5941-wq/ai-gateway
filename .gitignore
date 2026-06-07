@@ -13,3 +13,4 @@ gateway-*
 coverage.out
 *.test
 *.out
+web/node_modules/
