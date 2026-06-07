@@ -1,14 +1,17 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log/slog"
 	"os"
+	"time"
 
 	"ai-gateway/config"
 	"ai-gateway/internal/provider"
 	"ai-gateway/internal/router"
 	"ai-gateway/internal/server"
+	"ai-gateway/internal/tracing"
 )
 
 func main() {
@@ -22,6 +25,23 @@ func main() {
 		logger.Error("failed to load config", "error", err)
 		os.Exit(1)
 	}
+
+	// Tracing must be initialized before anything that creates spans.
+	tracerShutdown, err := tracing.Init(context.Background(), tracing.Config{
+		Enabled:     cfg.Tracing.Enabled,
+		Exporter:    cfg.Tracing.Exporter,
+		ServiceName: cfg.Tracing.ServiceName,
+		SampleRatio: cfg.Tracing.SampleRatio,
+	}, logger)
+	if err != nil {
+		logger.Error("failed to init tracing", "error", err)
+		os.Exit(1)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = tracerShutdown(shutdownCtx)
+	}()
 
 	provs := createProviders(cfg, logger)
 	r, err := router.NewRouter(cfg.Routes)

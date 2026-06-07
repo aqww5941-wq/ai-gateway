@@ -15,6 +15,16 @@ type Config struct {
 	Routes    []RouteConfig    `yaml:"routes"`
 	RateLimit RateLimitConfig  `yaml:"rate_limit"`
 	Cache     CacheConfig      `yaml:"cache"`
+	Tracing   TracingConfig    `yaml:"tracing"`
+}
+
+// TracingConfig configures OpenTelemetry tracing. All fields are optional; the
+// zero value disables tracing entirely.
+type TracingConfig struct {
+	Enabled     bool    `yaml:"enabled"`
+	Exporter    string  `yaml:"exporter"`     // "stdout" or "otlp"
+	ServiceName string  `yaml:"service_name"`
+	SampleRatio float64 `yaml:"sample_ratio"` // 0..1, 1 = sample everything
 }
 
 type AuthConfig struct {

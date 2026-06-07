@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -68,7 +69,7 @@ func (p *OpenAIProvider) ChatCompletionStream(ctx context.Context, req *ChatRequ
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		return nil, fmt.Errorf("upstream error: status=%d body=%s", resp.StatusCode, string(body))
+		return nil, newUpstreamErrorFromResp(p.name, resp.StatusCode, body, resp.Header.Get("Retry-After"), maxErrorBodyBytes)
 	}
 
 	ch := make(chan *StreamChunk, 16)
@@ -88,6 +89,9 @@ func (p *OpenAIProvider) buildRequest(ctx context.Context, req *ChatRequest) (*h
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+	// Inject W3C traceparent so the upstream call appears as a child span in
+	// the caller's trace. injectTraceContext is a no-op when tracing is off.
+	injectTraceContext(ctx, httpReq.Header)
 	return httpReq, nil
 }
 
@@ -111,7 +115,7 @@ func (p *OpenAIProvider) doChatCompletion(ctx context.Context, req *ChatRequest)
 	}
 
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("upstream error: status=%d body=%s", resp.StatusCode, string(respBody))
+		return nil, newUpstreamErrorFromResp(p.name, resp.StatusCode, respBody, resp.Header.Get("Retry-After"), maxErrorBodyBytes)
 	}
 
 	var chatResp ChatResponse
@@ -126,57 +130,62 @@ func (p *OpenAIProvider) readSSEStream(ctx context.Context, resp *http.Response,
 	defer resp.Body.Close()
 	defer close(ch)
 
-	reader := io.Reader(resp.Body)
-	buf := make([]byte, 0, 4096)
-	tmp := make([]byte, 256)
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 4096), 1<<20) // 1 MiB max event size
+	scanner.Split(splitSSEEvent)
 
-	for {
+	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
 			return
 		default:
 		}
 
-		n, err := reader.Read(tmp)
-		if n > 0 {
-			buf = append(buf, tmp[:n]...)
-		}
-		for {
-			idx := indexOf(buf, []byte("\n\n"))
-			if idx < 0 {
-				break
+		event := scanner.Bytes()
+		// An SSE event may have multiple "data:" lines; the OpenAI/DeepSeek
+		// stream sends one chunk per event, so we look for the first one.
+		for _, line := range bytes.Split(event, []byte("\n")) {
+			if !bytes.HasPrefix(line, []byte("data:")) {
+				continue
 			}
-			line := buf[:idx]
-			buf = buf[idx+2:]
-
-			if bytes.HasPrefix(line, []byte("data: ")) {
-				data := line[6:]
-				if string(data) == "[DONE]" {
-					return
-				}
-				var chunk StreamChunk
-				if err := json.Unmarshal(data, &chunk); err != nil {
-					p.logger.Warn("failed to parse SSE chunk", "error", err)
-					continue
-				}
-				select {
-				case ch <- &chunk:
-				case <-ctx.Done():
-					return
-				}
+			data := bytes.TrimSpace(line[5:])
+			if len(data) == 0 {
+				continue
+			}
+			if bytes.Equal(data, []byte("[DONE]")) {
+				return
+			}
+			var chunk StreamChunk
+			if err := json.Unmarshal(data, &chunk); err != nil {
+				p.logger.Warn("failed to parse SSE chunk", "error", err)
+				continue
+			}
+			select {
+			case ch <- &chunk:
+			case <-ctx.Done():
+				return
 			}
 		}
-		if err != nil {
-			return
-		}
+	}
+	if err := scanner.Err(); err != nil && err != io.EOF {
+		p.logger.Warn("sse scanner error", "error", err)
 	}
 }
 
-func indexOf(b []byte, sub []byte) int {
-	for i := 0; i <= len(b)-len(sub); i++ {
-		if bytes.Equal(b[i:i+len(sub)], sub) {
-			return i
-		}
+// splitSSEEvent splits the input on blank-line event delimiters (\n\n or \r\n\r\n).
+// It returns one full event per call without allocating new slices for the body.
+func splitSSEEvent(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
 	}
-	return -1
+	if i := bytes.Index(data, []byte("\n\n")); i >= 0 {
+		return i + 2, data[:i], nil
+	}
+	if i := bytes.Index(data, []byte("\r\n\r\n")); i >= 0 {
+		return i + 4, data[:i], nil
+	}
+	if atEOF {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
 }

@@ -107,6 +107,7 @@ func (p *ClaudeProvider) ChatCompletion(ctx context.Context, req *ChatRequest) (
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-api-key", p.apiKey)
 	httpReq.Header.Set("anthropic-version", "2023-06-01")
+	injectTraceContext(ctx, httpReq.Header)
 
 	p.logger.Debug("calling claude upstream", "url", p.baseURL+"/messages", "model", ar.Model)
 
@@ -122,7 +123,7 @@ func (p *ClaudeProvider) ChatCompletion(ctx context.Context, req *ChatRequest) (
 	}
 
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("upstream error: status=%d body=%s", resp.StatusCode, string(respBody))
+		return nil, newUpstreamErrorFromResp(p.name, resp.StatusCode, respBody, resp.Header.Get("Retry-After"), maxErrorBodyBytes)
 	}
 
 	var arResp anthropicResponse

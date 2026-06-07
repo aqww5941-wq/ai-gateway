@@ -5,19 +5,21 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"time"
+
+	"ai-gateway/internal/metrics"
 )
 
 type Observer struct {
-	ReqID           string
-	StartTime       time.Time
-	Model           string
-	Provider       string
-	PromptTokens    int
+	ReqID            string
+	StartTime        time.Time
+	Model            string
+	Provider         string
+	PromptTokens     int
 	CompletionTokens int
-	Cost           float64
-	Latency        time.Duration
-	CacheHit       bool
-	Status         int
+	Cost             float64
+	Latency          time.Duration
+	CacheHit         bool
+	Status           int
 }
 
 func New(model, provider string) *Observer {
@@ -50,6 +52,14 @@ func (o *Observer) Finalize(logger *slog.Logger, promptTokens, completionTokens 
 		"cache_hit", o.CacheHit,
 		"status", o.Status,
 	)
+
+	// Export to Prometheus. Cache hits are reported with provider="cache"
+	// so dashboards can distinguish them from upstream traffic.
+	provider := o.Provider
+	if cacheHit {
+		provider = "cache"
+	}
+	metrics.Observe(provider, o.Model, status, o.Latency, promptTokens, completionTokens, o.Cost)
 }
 
 func generateID() string {

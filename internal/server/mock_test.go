@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -158,11 +159,9 @@ func TestGatewayNonStream(t *testing.T) {
 	httpReq := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(body))
 	w := httptest.NewRecorder()
 
-	srv := &Server{
-		config:    cfg,
-		router:    r,
-		providers: providers,
-		logger:    testLogger,
+	srv, err := New(cfg, r, providers, testLogger)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	srv.handleChatCompletion(w, httpReq)
@@ -262,5 +261,128 @@ func TestGatewayCache(t *testing.T) {
 
 	if resp1.ID != resp2.ID {
 		t.Errorf("cached response mismatch: %s vs %s", resp1.ID, resp2.ID)
+	}
+}
+
+// TestGatewayStream exercises the end-to-end streaming path: SSE chunks
+// arrive in order, the [DONE] marker terminates the stream, and the gateway
+// does not race / leak goroutines.
+func TestGatewayStream(t *testing.T) {
+	mock := startMockLLMServer(t)
+	defer mock.Close()
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{Port: 0},
+		Cache:  config.CacheConfig{Enabled: false},
+		Providers: []config.ProviderConfig{
+			{Name: "mock", Type: "openai", APIKey: "test-key", BaseURL: mock.URL, Models: []string{"mock-model"}, Timeout: 5 * time.Second},
+		},
+		Routes: []config.RouteConfig{
+			{Name: "default", Strategy: "round_robin", Match: config.RouteMatch{Model: "mock-model"}, Targets: []config.RouteTarget{{Provider: "mock", Model: "mock-model"}}},
+		},
+	}
+	r, _ := router.NewRouter(cfg.Routes)
+	providers := map[string]provider.LLMProvider{}
+	for _, pc := range cfg.Providers {
+		p, _ := provider.NewOpenAI(pc, testLogger.With("provider", pc.Name))
+		providers[pc.Name] = p
+	}
+
+	srv, err := New(cfg, r, providers, testLogger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body := `{"model":"mock-model","messages":[{"role":"user","content":"Hi"}],"stream":true}`
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	srv.handleChatCompletion(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	out := w.Body.String()
+	if !strings.Contains(out, "Hello") || !strings.Contains(out, "World") {
+		t.Errorf("stream body missing expected tokens: %q", out)
+	}
+	if !strings.Contains(out, "[DONE]") {
+		t.Errorf("stream body missing [DONE]: %q", out)
+	}
+}
+
+// TestGatewayStreamCacheReplay verifies the new perf optimization:
+// a stream request whose payload matches a previously-cached non-stream
+// response is served entirely from cache, with zero upstream calls.
+func TestGatewayStreamCacheReplay(t *testing.T) {
+	var upstreamCalls atomic.Int32
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls.Add(1)
+		resp := provider.ChatResponse{
+			ID:      "chatcmpl-test",
+			Object:  "chat.completion",
+			Created: time.Now().Unix(),
+			Model:   "mock-model",
+			Choices: []provider.Choice{{Index: 0, Message: provider.Message{Role: "assistant", Content: "Cached content body"}, FinishReason: "stop"}},
+			Usage:   provider.Usage{PromptTokens: 5, CompletionTokens: 3, TotalTokens: 8},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer mock.Close()
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{Port: 0},
+		Cache:  config.CacheConfig{Enabled: true, Backend: "memory", TTL: "1h", Strategy: "exact", MaxSize: 10},
+		Providers: []config.ProviderConfig{
+			{Name: "mock", Type: "openai", APIKey: "test-key", BaseURL: mock.URL, Models: []string{"mock-model"}, Timeout: 5 * time.Second},
+		},
+		Routes: []config.RouteConfig{
+			{Name: "default", Strategy: "round_robin", Match: config.RouteMatch{Model: "mock-model"}, Targets: []config.RouteTarget{{Provider: "mock", Model: "mock-model"}}},
+		},
+	}
+	r, _ := router.NewRouter(cfg.Routes)
+	providers := map[string]provider.LLMProvider{}
+	for _, pc := range cfg.Providers {
+		p, _ := provider.NewOpenAI(pc, testLogger.With("provider", pc.Name))
+		providers[pc.Name] = p
+	}
+	srv, err := New(cfg, r, providers, testLogger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1st call: non-stream, populates the cache.
+	body := `{"model":"mock-model","messages":[{"role":"user","content":"same"}],"stream":false}`
+	req1 := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(body))
+	w1 := httptest.NewRecorder()
+	srv.handleChatCompletion(w1, req1)
+	if w1.Code != 200 {
+		t.Fatalf("non-stream: expected 200, got %d", w1.Code)
+	}
+	if upstreamCalls.Load() != 1 {
+		t.Fatalf("expected 1 upstream call, got %d", upstreamCalls.Load())
+	}
+
+	// 2nd call: same payload but stream=true. Must be replayed from cache.
+	streamBody := `{"model":"mock-model","messages":[{"role":"user","content":"same"}],"stream":true}`
+	req2 := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(streamBody))
+	w2 := httptest.NewRecorder()
+	srv.handleChatCompletion(w2, req2)
+	if w2.Code != 200 {
+		t.Fatalf("stream: expected 200, got %d", w2.Code)
+	}
+	if upstreamCalls.Load() != 1 {
+		t.Errorf("stream should hit cache: expected 1 upstream call, got %d", upstreamCalls.Load())
+	}
+	out := w2.Body.String()
+	if !strings.Contains(out, "Cached content body") {
+		t.Errorf("replayed stream missing cached content: %q", out)
+	}
+	if !strings.Contains(out, "[DONE]") {
+		t.Errorf("replayed stream missing [DONE]: %q", out)
+	}
+	if w2.Header().Get("X-Cache") != "HIT" {
+		t.Errorf("X-Cache header missing on cache replay")
 	}
 }

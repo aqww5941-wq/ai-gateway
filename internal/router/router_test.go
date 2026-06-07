@@ -2,14 +2,13 @@ package router
 
 import (
 	"context"
-	"math/rand"
 	"testing"
 
 	"ai-gateway/internal/provider"
 )
 
 func TestWeightedStrategy(t *testing.T) {
-	s := &WeightedStrategy{rng: rand.New(rand.NewSource(42))}
+	s := &WeightedStrategy{}
 
 	req := &provider.ChatRequest{Model: "gpt-4o"}
 	targets := []Target{

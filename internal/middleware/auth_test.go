@@ -8,10 +8,14 @@ import (
 	"testing"
 )
 
-func TestAuthNoKeys(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+func newTestLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+}
 
-	handler := Auth(nil, logger, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func TestAuthNoKeys(t *testing.T) {
+	logger := newTestLogger()
+
+	handler := NewAuth(nil).Wrap(logger, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
 	}))
 
@@ -25,10 +29,10 @@ func TestAuthNoKeys(t *testing.T) {
 }
 
 func TestAuthValidKey(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	logger := newTestLogger()
 	keys := []string{"secret-key-123"}
 
-	handler := Auth(keys, logger, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := NewAuth(keys).Wrap(logger, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
 	}))
 
@@ -43,10 +47,10 @@ func TestAuthValidKey(t *testing.T) {
 }
 
 func TestAuthInvalidKey(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	logger := newTestLogger()
 	keys := []string{"secret-key-123"}
 
-	handler := Auth(keys, logger, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := NewAuth(keys).Wrap(logger, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
 	}))
 
@@ -61,10 +65,10 @@ func TestAuthInvalidKey(t *testing.T) {
 }
 
 func TestAuthNoHeader(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	logger := newTestLogger()
 	keys := []string{"secret-key-123"}
 
-	handler := Auth(keys, logger, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := NewAuth(keys).Wrap(logger, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
 	}))
 
@@ -74,5 +78,21 @@ func TestAuthNoHeader(t *testing.T) {
 	handler.ServeHTTP(w, req)
 	if w.Code != 401 {
 		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestAuthMultipleKeysO1(t *testing.T) {
+	// Make sure correctness holds for many keys (O(1) lookup path).
+	keys := make([]string, 1000)
+	for i := range keys {
+		keys[i] = "k-" + string(rune('a'+i%26)) + "-" + string(rune('0'+i%10))
+	}
+	keys = append(keys, "winner")
+	a := NewAuth(keys)
+	if !a.allow("winner") {
+		t.Fatal("valid key rejected")
+	}
+	if a.allow("not-present") {
+		t.Fatal("invalid key accepted")
 	}
 }

@@ -8,38 +8,39 @@ auth:
   keys: []
 
 providers:
-  - name: openai
-    type: openai
-    api_key: ${OPENAI_API_KEY}
-    base_url: https://api.openai.com/v1
-    models:
-      - gpt-4o
-      - gpt-4o-mini
-    priority: 1
-    max_retries: 2
-    timeout: 60s
-
   - name: deepseek
     type: openai
     api_key: ${DEEPSEEK_API_KEY}
     base_url: https://api.deepseek.com/v1
     models:
-      - deepseek-chat
-      - deepseek-reasoner
-    priority: 2
+      - deepseek-v4-flash
+      - deepseek-v4-pro
+  - name: siliconflow
+    type: openai
+    api_key: ${SILICONFLOW_API_KEY}
+    base_url: https://api.siliconflow.cn/v1
+    models:
+      - Pro/moonshotai/Kimi-K2.6
+      - MiniMaxAI/MiniMax-M2.5
+    timeout: 60s
+
+  - name: doubao
+    type: openai
+    api_key: ${DOUBAO_API_KEY}
+    base_url: https://ark.cn-beijing.volces.com/api/v3
+    models:
+      - doubao-seed-2-0-pro-260215
+      - doubao-seed-2-0-mini-260428
+    timeout: 60s
 
 routes:
   - name: cheap-first
     match:
-      model: gpt-4o-mini
-    strategy: weighted
+      model: deepseek-v4-flash
+    strategy: round_robin
     targets:
-      - provider: openai
-        model: gpt-4o-mini
-        weight: 50
       - provider: deepseek
-        model: deepseek-chat
-        weight: 50
+        model: deepseek-v4-flash
 
   - name: smart-route
     match:
@@ -49,12 +50,58 @@ routes:
     semantic_rules:
       - complexity: simple
         target:
-          provider: deepseek
-          model: deepseek-chat
+          provider: doubao
+          model: doubao-seed-2-0-mini-260428
       - complexity: complex
         target:
-          provider: openai
-          model: gpt-4o
+          provider: doubao
+          model: doubao-seed-2-0-pro-260215
+  
+  - name: siliconflow-kimi
+    match:
+      model: kimi
+    strategy: round_robin
+    targets:
+      - provider: siliconflow
+        model: Pro/moonshotai/Kimi-K2.6
+
+  - name: siliconflow-minimax
+    match:
+      model: minimax
+    strategy: round_robin
+    targets:
+      - provider: siliconflow
+        model: MiniMaxAI/MiniMax-M2.5
+
+  - name: doubao-seed
+    match:
+      model: doubao
+    strategy: semantic
+    targets: []
+    semantic_rules:
+      - complexity: simple
+        target:
+          provider: doubao
+          model: doubao-seed-2-0-mini-260428
+      - complexity: complex
+        target:
+          provider: doubao
+          model: doubao-seed-2-0-pro-260215
+
+  - name: siliconflow-auto
+    match:
+      model: siliconflow
+    strategy: semantic
+    targets: []
+    semantic_rules:
+      - complexity: simple
+        target:
+          provider: siliconflow
+          model: MiniMaxAI/MiniMax-M2.5
+      - complexity: complex
+        target:
+          provider: siliconflow
+          model: Pro/moonshotai/Kimi-K2.6
 
 rate_limit:
   enabled: false

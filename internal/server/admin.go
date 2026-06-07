@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 
 	"ai-gateway/internal/cache"
+	"ai-gateway/internal/metrics"
 )
 
 type AdminHandler struct {
@@ -13,19 +14,32 @@ type AdminHandler struct {
 }
 
 type AdminStats struct {
-	CacheHits    atomic.Int64
-	CacheMisses  atomic.Int64
-	TotalReqs    atomic.Int64
-	TotalErrors  atomic.Int64
-	StreamReqs   atomic.Int64
+	CacheHits   atomic.Int64
+	CacheMisses atomic.Int64
+	TotalReqs   atomic.Int64
+	TotalErrors atomic.Int64
+	StreamReqs  atomic.Int64
 }
 
 var stats AdminStats
 
-func recordHit()    { stats.CacheHits.Add(1); stats.TotalReqs.Add(1) }
-func recordMiss()   { stats.CacheMisses.Add(1); stats.TotalReqs.Add(1) }
-func recordError()  { stats.TotalErrors.Add(1) }
-func recordStream() { stats.StreamReqs.Add(1) }
+func recordHit() {
+	stats.CacheHits.Add(1)
+	stats.TotalReqs.Add(1)
+	metrics.CacheHitsTotal.WithLabelValues("hit").Inc()
+}
+func recordMiss() {
+	stats.CacheMisses.Add(1)
+	stats.TotalReqs.Add(1)
+	metrics.CacheHitsTotal.WithLabelValues("miss").Inc()
+}
+func recordError() {
+	stats.TotalErrors.Add(1)
+}
+func recordStream() {
+	stats.StreamReqs.Add(1)
+	metrics.StreamRequestsTotal.Inc()
+}
 
 func (s *Server) adminRoutes() *http.ServeMux {
 	mux := http.NewServeMux()

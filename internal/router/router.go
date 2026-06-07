@@ -3,7 +3,7 @@ package router
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"sync"
 	"sync/atomic"
 
@@ -21,18 +21,14 @@ type RoutingStrategy interface {
 	Select(ctx context.Context, req *provider.ChatRequest, targets []Target) (*Target, error)
 }
 
-type WeightedStrategy struct {
-	rng *rand.Rand
-	mu  sync.Mutex
-}
+// WeightedStrategy picks a target by weighted random.
+// math/rand/v2 is goroutine-safe, so no mutex is needed on the hot path.
+type WeightedStrategy struct{}
 
 func (s *WeightedStrategy) Select(ctx context.Context, req *provider.ChatRequest, targets []Target) (*Target, error) {
 	if len(targets) == 0 {
 		return nil, fmt.Errorf("no targets")
 	}
-	s.mu.Lock()
-	r := s.rng.Float64()
-	s.mu.Unlock()
 
 	totalWeight := 0
 	for _, t := range targets {
@@ -43,8 +39,8 @@ func (s *WeightedStrategy) Select(ctx context.Context, req *provider.ChatRequest
 		return &targets[0], nil
 	}
 
+	threshold := rand.Float64() * float64(totalWeight)
 	cumulative := 0.0
-	threshold := r * float64(totalWeight)
 	for i, t := range targets {
 		cumulative += float64(t.Weight)
 		if cumulative >= threshold {
@@ -80,13 +76,15 @@ type Router struct {
 func NewRouter(configs []config.RouteConfig) (*Router, error) {
 	r := &Router{routes: make(map[string]*routeEntry)}
 	for _, cfg := range configs {
-		if len(cfg.Targets) == 0 {
+		if len(cfg.Targets) == 0 && cfg.Strategy != "semantic" {
 			return nil, fmt.Errorf("route %q: no targets", cfg.Name)
 		}
 		targets := make([]Target, len(cfg.Targets))
 		for i, t := range cfg.Targets {
 			targets[i] = Target{Provider: t.Provider, Model: t.Model}
-			if cfg.Strategy == "weighted" {
+			// Both weighted and latency use a base weight; latency multiplies
+			// it by the inverse-latency factor at routing time.
+			if cfg.Strategy == "weighted" || cfg.Strategy == "latency" {
 				targets[i].Weight = t.Weight
 			}
 		}
@@ -95,9 +93,12 @@ func NewRouter(configs []config.RouteConfig) (*Router, error) {
 		case "round_robin":
 			strategy = &RoundRobinStrategy{}
 		case "weighted":
-			strategy = &WeightedStrategy{rng: rand.New(rand.NewSource(rand.Int63()))}
+			strategy = &WeightedStrategy{}
 		case "fallback":
 			strategy = &FallbackStrategy{}
+		case "latency":
+			// All knobs are zero → applyDefaults inside the strategy.
+			strategy = NewLatencyStrategy(0, 0, 0)
 		case "semantic":
 			s, err := NewSemanticStrategy(cfg.SemanticRules)
 			if err != nil {
