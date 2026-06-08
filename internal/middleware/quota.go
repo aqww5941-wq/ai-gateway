@@ -3,7 +3,9 @@ package middleware
 import (
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"ai-gateway/internal/store"
 )
@@ -32,6 +34,8 @@ func QuotaCheck(s *store.Store, logger *slog.Logger, next http.Handler) http.Han
 			next.ServeHTTP(w, r) // fail open
 			return
 		}
+
+		setQuotaHeaders(w, limit, limit-used, nextDailyReset())
 		if !allowed {
 			logger.Warn("quota exceeded",
 				"key", identity.Name,
@@ -43,4 +47,22 @@ func QuotaCheck(s *store.Store, logger *slog.Logger, next http.Handler) http.Han
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func setQuotaHeaders(w http.ResponseWriter, limit, remaining int64, resetAt int64) {
+	if limit <= 0 {
+		return
+	}
+	if remaining < 0 {
+		remaining = 0
+	}
+	w.Header().Set("X-RateLimit-Limit-Requests", strconv.FormatInt(limit, 10))
+	w.Header().Set("X-RateLimit-Remaining-Requests", strconv.FormatInt(remaining, 10))
+	w.Header().Set("X-RateLimit-Reset-Requests", strconv.FormatInt(resetAt, 10))
+}
+
+func nextDailyReset() int64 {
+	now := time.Now().UTC()
+	tomorrow := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, time.UTC)
+	return tomorrow.Unix()
 }
