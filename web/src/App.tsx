@@ -1,8 +1,9 @@
-import { useState, Suspense, lazy } from 'react'
+import { useState, Suspense, lazy, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { LayoutDashboard, Route, Database, ShieldAlert, Cpu, Key, FileText, Shield, Menu, X } from 'lucide-react'
+import { LayoutDashboard, Route, Database, ShieldAlert, Cpu, Key, FileText, Shield, Menu, X, LogIn, LogOut } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { getToken, setToken, clearToken } from '@/api'
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const RoutesPage = lazy(() => import('./pages/RoutesPage'))
@@ -26,9 +27,75 @@ const tabs = [
   { key: 'filter', label: 'Filter', icon: Shield },
 ] as const
 
+function useAuth() {
+  const [token, setTokenState] = useState<string | null>(getToken)
+
+  const login = useCallback((t: string) => {
+    setToken(t)
+    setTokenState(t)
+  }, [])
+
+  const logout = useCallback(() => {
+    clearToken()
+    setTokenState(null)
+  }, [])
+
+  return { token, login, logout }
+}
+
+function LoginForm({ onLogin }: { onLogin: (t: string) => void }) {
+  const [value, setValue] = useState('')
+  const [error, setError] = useState('')
+
+  const handleSubmit = () => {
+    const t = value.trim()
+    if (!t) { setError('Enter an API key'); return }
+    setToken(t)
+    onLogin(t)
+  }
+
+  return (
+    <div className="flex h-[50vh] items-center justify-center">
+      <div className="w-full max-w-sm space-y-4 rounded-lg border border-border bg-card p-6">
+        <div className="flex items-center gap-2">
+          <LogIn className="w-5 h-5 text-muted-foreground" />
+          <h2 className="font-semibold">Login</h2>
+        </div>
+        <p className="text-sm text-muted-foreground">Enter your admin API key to access the dashboard.</p>
+        <input
+          type="password"
+          value={value}
+          onChange={e => { setValue(e.target.value); setError(''); }}
+          onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+          placeholder="sk-..."
+          className="w-full px-3 py-2 rounded-md border bg-background text-sm font-mono"
+          autoFocus
+        />
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <button
+          onClick={handleSubmit}
+          disabled={!value.trim()}
+          className="w-full px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50"
+        >
+          Authenticate
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function App() {
+  const { token, login, logout } = useAuth()
   const [activeTab, setActiveTab] = useState<Tab>('dashboard')
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+
+  if (!token) {
+    return (
+      <div className="flex h-screen w-full bg-background text-foreground items-center justify-center">
+        <LoginForm onLogin={login} />
+      </div>
+    )
+  }
 
   return (
     <div className="flex h-screen w-full bg-background text-foreground overflow-hidden">
@@ -58,6 +125,15 @@ function App() {
             )
           })}
         </nav>
+        <div className="p-4 border-t border-border">
+          <button
+            onClick={logout}
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
+          >
+            <LogOut className="w-4 h-4" />
+            Logout
+          </button>
+        </div>
       </aside>
 
       {/* Main Content Area */}

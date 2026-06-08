@@ -88,8 +88,18 @@ func (a *Auth) refreshLoop() {
 	}
 }
 
+// paths that skip auth: static assets and prometheus metrics.
+var skipAuthPrefixes = []string{"/admin/dashboard/", "/metrics"}
+
 func (a *Auth) Wrap(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, p := range skipAuthPrefixes {
+			if strings.HasPrefix(r.URL.Path, p) {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+
 		auth := r.Header.Get("Authorization")
 		if auth == "" || !strings.HasPrefix(auth, "Bearer ") {
 			http.Error(w, "unauthorized: missing api key", http.StatusUnauthorized)

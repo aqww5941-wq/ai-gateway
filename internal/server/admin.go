@@ -9,7 +9,6 @@ import (
 	"ai-gateway/internal/cache"
 	"ai-gateway/internal/metrics"
 	"ai-gateway/internal/middleware"
-	"ai-gateway/internal/static"
 )
 
 type AdminHandler struct {
@@ -71,9 +70,6 @@ func (s *Server) adminRoutes() http.Handler {
 	mux.HandleFunc("DELETE /admin/api/v1/keys/", s.handleAdminKeysDelete)
 	mux.HandleFunc("GET /admin/api/v1/audit-logs", s.handleAdminAuditLogs)
 	mux.HandleFunc("GET /admin/api/v1/filter", s.handleAdminFilter)
-
-	// React SPA
-	mux.Handle("/admin/dashboard/", static.SPAHandler())
 
 	return middleware.AdminOnly(mux)
 }

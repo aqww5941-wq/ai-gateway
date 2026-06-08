@@ -26,6 +26,7 @@ import (
 	"ai-gateway/internal/provider"
 	"ai-gateway/internal/retry"
 	"ai-gateway/internal/router"
+	"ai-gateway/internal/static"
 	"ai-gateway/internal/tracing"
 )
 
@@ -180,7 +181,9 @@ func New(cfg *config.Config, r *router.Router, provs map[string]provider.LLMProv
 	adminMux := s.adminRoutes()
 	mainMux := http.NewServeMux()
 	mainMux.HandleFunc("POST /v1/chat/completions", s.handleChatCompletion)
-	// Route /admin/ to adminMux
+	// Serve the React SPA without auth — it calls the admin API which enforces auth.
+	mainMux.Handle("/admin/dashboard/", static.SPAHandler())
+	// Route /admin/ to adminMux (API endpoints, auth required)
 	mainMux.Handle("/admin/", adminMux)
 	// Expose Prometheus scrape endpoint.
 	mainMux.Handle("GET /metrics", metrics.Register())
