@@ -175,7 +175,7 @@ func toAnthropicRequest(req *ChatRequest) (*anthropicRequest, string) {
 	}, system
 }
 
-func toChatResponse(ar *anthropicResponse, system string) *ChatResponse {
+func toChatResponse(ar *anthropicResponse, _ string) *ChatResponse {
 	content := ""
 	for _, block := range ar.Content {
 		if block.Type == "text" {
