@@ -1,25 +1,14 @@
 import { useMemo } from 'react'
-import { usePolling } from '../hooks/usePolling'
-import { api } from '../api'
-import MetricCard from '../components/MetricCard'
-import Card from '../components/Card'
+import { usePolling } from '@/hooks/usePolling'
+import { api } from '@/api'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { formatUptime, formatPct } from '@/utils'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
-import type { Overview, LatencyRouteSnapshot } from '../types'
+import { Activity, Zap, AlertTriangle, Clock, Layers, Combine } from 'lucide-react'
+import type { Overview, LatencyRouteSnapshot } from '@/types'
 
-function formatUptime(s: number): string {
-  const d = Math.floor(s / 86400)
-  const h = Math.floor((s % 86400) / 3600)
-  const m = Math.floor((s % 3600) / 60)
-  if (d > 0) return `${d}天 ${h}时 ${m}分`
-  if (h > 0) return `${h}时 ${m}分`
-  return `${m}分`
-}
-
-function formatPct(v: number): string {
-  return v.toFixed(1) + '%'
-}
-
-const CACHE_COLORS = ['#22c55e', '#ef4444']
+const CACHE_COLORS = ['#10b981', '#ef4444']
 
 export default function DashboardPage() {
   const { data: overview, loading: ovLoading } = usePolling<Overview>(api.getOverview, 5000)
@@ -39,121 +28,138 @@ export default function DashboardPage() {
   const cachePie = useMemo(() => {
     if (!overview) return []
     return [
-      { name: '命中', value: overview.cache_hits },
-      { name: '未命中', value: overview.cache_misses },
+      { name: 'Hits', value: overview.cache_hits },
+      { name: 'Misses', value: overview.cache_misses },
     ].filter((d) => d.value > 0)
   }, [overview])
 
-  if (ovLoading) return <div className="loading">加载中...</div>
+  if (ovLoading) return (
+    <div className="flex h-[50vh] items-center justify-center">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+    </div>
+  )
+
+  const metrics = [
+    { title: 'Total Requests', value: overview?.total_requests ?? 0, icon: Activity, sub: 'Lifetime metric' },
+    { title: 'Cache Hit Rate', value: formatPct(overview?.hit_rate_pct ?? 0), icon: Zap, sub: overview?.cache_enabled ? `${overview?.cache_strategy} strategy` : 'Disabled' },
+    { title: 'Error Rate', value: formatPct(overview?.error_rate_pct ?? 0), icon: AlertTriangle, sub: `${overview?.total_errors ?? 0} total errors` },
+    { title: 'Uptime', value: formatUptime(overview?.uptime_seconds ?? 0), icon: Clock, sub: 'Since last restart' },
+    { title: 'Stream Requests', value: overview?.stream_requests ?? 0, icon: Layers, sub: 'SSE connections' },
+    { title: 'Coalesce Ratio', value: formatPct(overview?.coalescer?.dedup_ratio_pct ?? 0), icon: Combine, sub: `${overview?.coalescer?.shared_calls ?? 0} shared` },
+  ]
 
   return (
-    <div>
-      <div className="metric-grid">
-        <MetricCard label="总请求数" value={overview?.total_requests ?? 0} />
-        <MetricCard
-          label="缓存命中率"
-          value={formatPct(overview?.hit_rate_pct ?? 0)}
-          sub={overview?.cache_enabled ? (overview?.cache_strategy ?? '') + ' 策略' : '已禁用'}
-        />
-        <MetricCard
-          label="错误率"
-          value={formatPct(overview?.error_rate_pct ?? 0)}
-          sub={`${overview?.total_errors ?? 0} 次错误`}
-        />
-        <MetricCard label="运行时长" value={formatUptime(overview?.uptime_seconds ?? 0)} />
-        <MetricCard
-          label="流式请求数"
-          value={overview?.stream_requests ?? 0}
-        />
-        <MetricCard
-          label="请求合并率"
-          value={formatPct(overview?.coalescer?.dedup_ratio_pct ?? 0)}
-          sub={`${overview?.coalescer?.shared_calls ?? 0} 共享 / ${overview?.coalescer?.total_calls ?? 0} 总计`}
-        />
+    <div className="space-y-6 pb-8">
+      <div>
+        <h2 className="text-2xl font-bold tracking-tight">Dashboard Overview</h2>
+        <p className="text-muted-foreground mt-1">Real-time metrics and performance analytics.</p>
       </div>
 
-      <div className="charts-grid">
-        <Card title="P99 延迟 (ms)">
-          <div className="chart-container">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {metrics.map((m, i) => {
+          const Icon = m.icon
+          return (
+            <Card key={i} className="hover:border-primary/50 transition-colors">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">{m.title}</CardTitle>
+                <Icon className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{m.value}</div>
+                <p className="text-xs text-muted-foreground mt-1">{m.sub}</p>
+              </CardContent>
+            </Card>
+          )
+        })}
+      </div>
+
+      <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>P99 Latency (ms)</CardTitle>
+          </CardHeader>
+          <CardContent className="h-[300px]">
             {latencyChart.length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={latencyChart} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#2a2d3a" />
-                  <XAxis dataKey="name" tick={{ fill: '#6b6f82', fontSize: 11 }} />
-                  <YAxis tick={{ fill: '#6b6f82', fontSize: 11 }} />
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={latencyChart} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                  <XAxis dataKey="name" tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }} axisLine={false} tickLine={false} />
                   <Tooltip
-                    contentStyle={{ background: '#1e2130', border: '1px solid #2a2d3a', borderRadius: 8 }}
-                    labelStyle={{ color: '#e4e6eb' }}
+                    contentStyle={{ backgroundColor: 'hsl(var(--card))', borderColor: 'hsl(var(--border))', borderRadius: '8px' }}
+                    itemStyle={{ color: 'hsl(var(--foreground))' }}
                   />
-                  <Bar dataKey="p99" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="p99" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <div className="empty">暂无延迟数据</div>
+              <div className="h-full flex items-center justify-center text-muted-foreground">No Latency Data</div>
             )}
-          </div>
+          </CardContent>
         </Card>
 
-        <Card title="缓存表现">
-          <div className="chart-container">
+        <Card>
+          <CardHeader>
+            <CardTitle>Cache Performance</CardTitle>
+          </CardHeader>
+          <CardContent className="h-[300px]">
             {cachePie.length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
+              <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
                     data={cachePie}
                     cx="50%"
                     cy="50%"
-                    innerRadius={60}
+                    innerRadius={70}
                     outerRadius={100}
+                    paddingAngle={5}
                     dataKey="value"
-                    label={({ name, value }) => `${name}: ${value}`}
+                    stroke="none"
                   >
-                    {cachePie.map((_, i) => (
-                      <Cell key={i} fill={CACHE_COLORS[i]} />
+                    {cachePie.map((_, index) => (
+                      <Cell key={`cell-${index}`} fill={CACHE_COLORS[index % CACHE_COLORS.length]} />
                     ))}
                   </Pie>
                   <Tooltip
-                    contentStyle={{ background: '#1e2130', border: '1px solid #2a2d3a', borderRadius: 8 }}
+                    contentStyle={{ backgroundColor: 'hsl(var(--card))', borderColor: 'hsl(var(--border))', borderRadius: '8px' }}
                   />
                 </PieChart>
               </ResponsiveContainer>
             ) : (
-              <div className="empty">暂无缓存数据</div>
+              <div className="h-full flex items-center justify-center text-muted-foreground">No Cache Data</div>
             )}
-          </div>
+          </CardContent>
         </Card>
       </div>
 
-      <div className="metric-grid">
-        <Card title="缓存状态">
-          <div style={{ fontSize: 14 }}>
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle>Cache System Status</CardTitle>
+          </CardHeader>
+          <CardContent>
             {overview?.cache_enabled ? (
-              <span className="badge badge-healthy" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <span className="badge-dot" style={{ background: 'var(--success)' }} />
-                {overview.cache_backend} / {overview.cache_strategy}
-              </span>
+              <div className="flex items-center gap-2">
+                <Badge variant="success" className="h-6">Active</Badge>
+                <span className="text-sm font-medium">{overview.cache_backend} / {overview.cache_strategy}</span>
+              </div>
             ) : (
-              <span className="badge badge-unhealthy" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <span className="badge-dot" style={{ background: 'var(--danger)' }} />
-                已禁用
-              </span>
+              <Badge variant="destructive" className="h-6">Disabled</Badge>
             )}
-          </div>
+          </CardContent>
         </Card>
-        <Card title="限流状态">
-          <div style={{ fontSize: 14 }}>
+        
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle>Rate Limiter Status</CardTitle>
+          </CardHeader>
+          <CardContent>
             {overview?.rate_limit_enabled ? (
-              <span className="badge badge-healthy" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <span className="badge-dot" style={{ background: 'var(--success)' }} />
-                已启用
-              </span>
+              <Badge variant="success" className="h-6">Enforcing</Badge>
             ) : (
-              <span className="badge badge-degraded" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <span className="badge-dot" style={{ background: 'var(--text-muted)' }} />
-                已禁用
-              </span>
+              <Badge variant="secondary" className="h-6">Bypassed</Badge>
             )}
-          </div>
+          </CardContent>
         </Card>
       </div>
     </div>

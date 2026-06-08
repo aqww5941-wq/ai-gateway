@@ -19,7 +19,10 @@ export function usePolling<T>(
         }
       })
       .catch((e: Error) => {
-        if (mounted.current) setError(e.message);
+        if (mounted.current) {
+          setError(e.message);
+          setLoading(false);
+        }
       });
   }, [fetcher]);
 

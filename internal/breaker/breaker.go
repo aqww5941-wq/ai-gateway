@@ -264,10 +264,10 @@ func (m *Manager) Get(name string) *Breaker {
 
 // Snapshot is the diagnostic view of a single breaker.
 type Snapshot struct {
-	Name     string
-	State    string
-	Failures uint32
-	ProbesOK uint32
+	Name     string `json:"name"`
+	State    string `json:"state"`
+	Failures uint32 `json:"failures"`
+	ProbesOK uint32 `json:"probes_ok"`
 }
 
 // Snapshots returns the current state of every registered breaker. Useful for
