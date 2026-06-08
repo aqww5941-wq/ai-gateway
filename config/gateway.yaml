@@ -2,10 +2,30 @@ server:
   port: 8080
   read_timeout: 30s
   write_timeout: 120s
+  db_path: data/gateway.db
+  max_concurrency: 500
+  queue_size: 200
+  queue_timeout: 10s
+  transport:
+    max_conns_per_host: 100
+    max_idle_conns_per_host: 50
+    max_idle_conns: 200
 
 auth:
-  enabled: false
-  keys: []
+  enabled: true
+  # Seed keys — only imported when DB is empty on first start.
+  # After that, manage keys via admin API.
+  keys:
+    - token: "sk-test-123"
+      name: "admin"
+      role: admin
+      daily_token_limit: 1000000
+
+    - token: "sk-user-demo"
+      name: "demo-user"
+      role: user
+      daily_token_limit: 10000
+      models: "deepseek-v4-flash,kimi"
 
 providers:
   - name: deepseek
@@ -108,6 +128,10 @@ rate_limit:
   per_key: 60
   per_model: 100
 
+quota:
+  enabled: true
+  reset_hour_utc: 0
+
 cache:
   enabled: true
   backend: memory          # memory | redis
@@ -118,3 +142,13 @@ cache:
   redis_addr: localhost:6379
   redis_pass: ""
   redis_db: 0
+
+filter:
+  enabled: true
+  mode: mask               # mask | block
+  rules:
+    - phone_cn
+    - id_card_cn
+    - email
+    - credit_card
+    - api_key

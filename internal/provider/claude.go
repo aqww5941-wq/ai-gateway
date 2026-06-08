@@ -50,6 +50,12 @@ func NewClaude(cfg config.ProviderConfig, logger *slog.Logger) (*ClaudeProvider,
 func (p *ClaudeProvider) Name() string             { return p.name }
 func (p *ClaudeProvider) SupportedModels() []string { return p.models }
 
+func (p *ClaudeProvider) SetTransport(rt *http.Transport) {
+	if rt != nil {
+		p.client.Transport = rt
+	}
+}
+
 // --- Anthropic request/response types ---
 
 type anthropicMessage struct {

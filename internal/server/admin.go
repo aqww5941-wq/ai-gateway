@@ -8,6 +8,7 @@ import (
 
 	"ai-gateway/internal/cache"
 	"ai-gateway/internal/metrics"
+	"ai-gateway/internal/middleware"
 	"ai-gateway/internal/static"
 )
 
@@ -46,7 +47,7 @@ func recordStream() {
 	metrics.StreamRequestsTotal.Inc()
 }
 
-func (s *Server) adminRoutes() *http.ServeMux {
+func (s *Server) adminRoutes() http.Handler {
 	mux := http.NewServeMux()
 	ah := &AdminHandler{server: s}
 
@@ -63,11 +64,18 @@ func (s *Server) adminRoutes() *http.ServeMux {
 	mux.HandleFunc("GET /admin/api/v1/routes", s.handleAdminRoutesV1)
 	mux.HandleFunc("GET /admin/api/v1/cache", s.handleAdminCacheV1)
 	mux.HandleFunc("GET /admin/api/v1/cache/entries/", s.handleAdminCacheEntry)
+	mux.HandleFunc("GET /admin/api/v1/quotas", s.handleAdminQuotas)
+	mux.HandleFunc("GET /admin/api/v1/keys", s.handleAdminKeysList)
+	mux.HandleFunc("POST /admin/api/v1/keys", s.handleAdminKeysCreate)
+	mux.HandleFunc("PUT /admin/api/v1/keys/", s.handleAdminKeysUpdate)
+	mux.HandleFunc("DELETE /admin/api/v1/keys/", s.handleAdminKeysDelete)
+	mux.HandleFunc("GET /admin/api/v1/audit-logs", s.handleAdminAuditLogs)
+	mux.HandleFunc("GET /admin/api/v1/filter", s.handleAdminFilter)
 
 	// React SPA
 	mux.Handle("/admin/dashboard/", static.SPAHandler())
 
-	return mux
+	return middleware.AdminOnly(mux)
 }
 
 func (ah *AdminHandler) handleHealth(w http.ResponseWriter, r *http.Request) {

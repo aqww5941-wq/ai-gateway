@@ -2,11 +2,13 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"ai-gateway/internal/cache"
+	"ai-gateway/internal/filter"
 	"ai-gateway/internal/router"
 )
 
@@ -230,6 +232,199 @@ func (s *Server) handleAdminCacheEntry(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, entry)
+}
+
+// GET /admin/api/v1/quotas
+func (s *Server) handleAdminQuotas(w http.ResponseWriter, r *http.Request) {
+	if s.store == nil {
+		writeJSON(w, map[string]interface{}{
+			"quotas":  []interface{}{},
+			"enabled": false,
+		})
+		return
+	}
+
+	snapshots, err := s.store.GetQuotaSnapshots()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]interface{}{
+		"quotas":  snapshots,
+		"enabled": true,
+	})
+}
+
+// GET /admin/api/v1/keys
+func (s *Server) handleAdminKeysList(w http.ResponseWriter, r *http.Request) {
+	if s.store == nil {
+		writeJSON(w, map[string]interface{}{"keys": []interface{}{}})
+		return
+	}
+	keys, err := s.store.ListKeys()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]interface{}{"keys": keys})
+}
+
+// POST /admin/api/v1/keys
+func (s *Server) handleAdminKeysCreate(w http.ResponseWriter, r *http.Request) {
+	if s.store == nil {
+		http.Error(w, "store not available", http.StatusInternalServerError)
+		return
+	}
+	var body struct {
+		Name         string `json:"name"`
+		Role         string `json:"role"`
+		DailyLimit   int64  `json:"daily_limit"`
+		MonthlyLimit int64  `json:"monthly_limit"`
+		Models       string `json:"models"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if body.Name == "" {
+		http.Error(w, "name is required", http.StatusBadRequest)
+		return
+	}
+	token, err := s.store.CreateKey(body.Name, body.Role, body.Models, body.DailyLimit, body.MonthlyLimit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, map[string]interface{}{
+		"name":  body.Name,
+		"token": token,
+	})
+}
+
+// PUT /admin/api/v1/keys/{id}
+func (s *Server) handleAdminKeysUpdate(w http.ResponseWriter, r *http.Request) {
+	if s.store == nil {
+		http.Error(w, "store not available", http.StatusInternalServerError)
+		return
+	}
+	idStr := strings.TrimPrefix(r.URL.Path, "/admin/api/v1/keys/")
+	id, err := parseID(idStr)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	var body struct {
+		Name         string `json:"name"`
+		Role         string `json:"role"`
+		DailyLimit   int64  `json:"daily_limit"`
+		MonthlyLimit int64  `json:"monthly_limit"`
+		Models       string `json:"models"`
+		IsActive     *bool  `json:"is_active"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if body.IsActive != nil {
+		if err := s.store.SetKeyActive(id, *body.IsActive); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	if body.Name != "" || body.Role != "" || body.Models != "" || body.DailyLimit > 0 || body.MonthlyLimit > 0 {
+		if err := s.store.UpdateKey(id, body.Name, body.Role, body.Models, body.DailyLimit, body.MonthlyLimit); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// DELETE /admin/api/v1/keys/{id}
+func (s *Server) handleAdminKeysDelete(w http.ResponseWriter, r *http.Request) {
+	if s.store == nil {
+		http.Error(w, "store not available", http.StatusInternalServerError)
+		return
+	}
+	idStr := strings.TrimPrefix(r.URL.Path, "/admin/api/v1/keys/")
+	id, err := parseID(idStr)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	if err := s.store.DeleteKey(id); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// GET /admin/api/v1/audit-logs?key=&limit=50&offset=0
+func (s *Server) handleAdminAuditLogs(w http.ResponseWriter, r *http.Request) {
+	if s.store == nil {
+		writeJSON(w, map[string]interface{}{"logs": []interface{}{}, "total": 0})
+		return
+	}
+
+	q := r.URL.Query()
+	keyName := q.Get("key")
+	limit := 50
+	offset := 0
+	if v := q.Get("limit"); v != "" {
+		fmt.Sscanf(v, "%d", &limit)
+	}
+	if v := q.Get("offset"); v != "" {
+		fmt.Sscanf(v, "%d", &offset)
+	}
+
+	logs, total, err := s.store.QueryAudit(keyName, limit, offset)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]interface{}{
+		"logs":  logs,
+		"total": total,
+	})
+}
+
+// GET /admin/api/v1/filter
+func (s *Server) handleAdminFilter(w http.ResponseWriter, r *http.Request) {
+	allRules := filter.AvailableRules()
+	cfg := s.config.Filter
+
+	enabledSet := make(map[string]bool, len(cfg.Rules))
+	for _, name := range cfg.Rules {
+		enabledSet[name] = true
+	}
+
+	type ruleStatus struct {
+		Name        string `json:"name"`
+		Label       string `json:"label"`
+		Description string `json:"description"`
+		Enabled     bool   `json:"enabled"`
+	}
+	rules := make([]ruleStatus, 0, len(allRules))
+	for _, ar := range allRules {
+		rules = append(rules, ruleStatus{
+			Name:        ar["name"],
+			Label:       ar["label"],
+			Description: ar["description"],
+			Enabled:     enabledSet[ar["name"]],
+		})
+	}
+
+	writeJSON(w, map[string]interface{}{
+		"enabled": cfg.Enabled,
+		"mode":    cfg.Mode,
+		"rules":   rules,
+	})
+}
+
+func parseID(s string) (int64, error) {
+	var id int64
+	_, err := fmt.Sscanf(s, "%d", &id)
+	return id, err
 }
 
 // --- helpers ---

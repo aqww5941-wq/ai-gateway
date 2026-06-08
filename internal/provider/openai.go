@@ -47,6 +47,12 @@ func NewOpenAI(cfg config.ProviderConfig, logger *slog.Logger) (*OpenAIProvider,
 func (p *OpenAIProvider) Name() string             { return p.name }
 func (p *OpenAIProvider) SupportedModels() []string { return p.models }
 
+func (p *OpenAIProvider) SetTransport(rt *http.Transport) {
+	if rt != nil {
+		p.client.Transport = rt
+	}
+}
+
 func (p *OpenAIProvider) ChatCompletion(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
 	if req.Stream {
 		return nil, fmt.Errorf("streaming not supported")

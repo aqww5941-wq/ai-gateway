@@ -4,39 +4,39 @@ import (
 	"crypto/subtle"
 	"strconv"
 	"testing"
+
+	"ai-gateway/internal/store"
 )
 
-// BenchmarkAuthAllow_HashLookup confirms that the SHA-256-indexed lookup is
-// O(1) regardless of the configured key count. With the original slice
-// implementation, time-per-op grew linearly with len(keys).
-func BenchmarkAuthAllow_10Keys(b *testing.B) {
-	benchAuth(b, 10)
-}
+func BenchmarkAuthLookup_10Keys(b *testing.B)  { benchAuthLookup(b, 10) }
+func BenchmarkAuthLookup_100Keys(b *testing.B) { benchAuthLookup(b, 100) }
 
-func BenchmarkAuthAllow_1000Keys(b *testing.B) {
-	benchAuth(b, 1000)
-}
-
-func BenchmarkAuthAllow_10000Keys(b *testing.B) {
-	benchAuth(b, 10000)
-}
-
-func benchAuth(b *testing.B, n int) {
-	keys := make([]string, n)
-	for i := range keys {
-		keys[i] = "k-" + strconv.Itoa(i)
+func benchAuthLookup(b *testing.B, n int) {
+	st, err := store.Open(":memory:")
+	if err != nil {
+		b.Fatal(err)
 	}
-	keys[n-1] = "winner"
-	a := NewAuth(keys)
+	defer st.Close()
+
+	token := ""
+	for i := range n {
+		t, err := st.CreateKey("k-"+strconv.Itoa(i), "user", "", 0, 0)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if i == n-1 {
+			token = t
+		}
+	}
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = a.allow("winner")
+		_, _ = st.LookupIdentity(token)
 	}
 }
 
-// --- Baseline (the original O(N) implementation) for direct comparison. ---
+// --- Baseline linear comparison ---
 
 func authAllowLinear(token string, keys []string) bool {
 	for _, k := range keys {
@@ -49,7 +49,6 @@ func authAllowLinear(token string, keys []string) bool {
 
 func BenchmarkAuthAllow_Linear_10Keys(b *testing.B)    { benchAuthLinear(b, 10) }
 func BenchmarkAuthAllow_Linear_1000Keys(b *testing.B)  { benchAuthLinear(b, 1000) }
-func BenchmarkAuthAllow_Linear_10000Keys(b *testing.B) { benchAuthLinear(b, 10000) }
 
 func benchAuthLinear(b *testing.B, n int) {
 	keys := make([]string, n)

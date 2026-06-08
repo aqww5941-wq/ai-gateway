@@ -1,6 +1,6 @@
 import { useState, Suspense, lazy } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { LayoutDashboard, Route, Database, ShieldAlert, Cpu, Menu, X } from 'lucide-react'
+import { LayoutDashboard, Route, Database, ShieldAlert, Cpu, Key, FileText, Shield, Menu, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 
@@ -9,8 +9,11 @@ const RoutesPage = lazy(() => import('./pages/RoutesPage'))
 const CachePage = lazy(() => import('./pages/CachePage'))
 const BreakersPage = lazy(() => import('./pages/BreakersPage'))
 const ProvidersPage = lazy(() => import('./pages/ProvidersPage'))
+const KeysPage = lazy(() => import('./pages/KeysPage'))
+const AuditPage = lazy(() => import('./pages/AuditPage'))
+const FilterPage = lazy(() => import('./pages/FilterPage'))
 
-type Tab = 'dashboard' | 'routes' | 'cache' | 'breakers' | 'providers'
+type Tab = 'dashboard' | 'routes' | 'cache' | 'breakers' | 'providers' | 'keys' | 'audit' | 'filter'
 
 const tabs = [
   { key: 'dashboard', label: 'Overview', icon: LayoutDashboard },
@@ -18,6 +21,9 @@ const tabs = [
   { key: 'cache', label: 'Cache', icon: Database },
   { key: 'breakers', label: 'Breakers', icon: ShieldAlert },
   { key: 'providers', label: 'Providers', icon: Cpu },
+  { key: 'keys', label: 'Keys', icon: Key },
+  { key: 'audit', label: 'Logs', icon: FileText },
+  { key: 'filter', label: 'Filter', icon: Shield },
 ] as const
 
 function App() {
@@ -120,6 +126,9 @@ function App() {
                   {activeTab === 'cache' && <CachePage />}
                   {activeTab === 'breakers' && <BreakersPage />}
                   {activeTab === 'providers' && <ProvidersPage />}
+                  {activeTab === 'keys' && <KeysPage />}
+                  {activeTab === 'audit' && <AuditPage />}
+                  {activeTab === 'filter' && <FilterPage />}
                 </motion.div>
               </AnimatePresence>
             </ErrorBoundary>

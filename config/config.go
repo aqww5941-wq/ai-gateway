@@ -14,8 +14,17 @@ type Config struct {
 	Providers []ProviderConfig `yaml:"providers"`
 	Routes    []RouteConfig    `yaml:"routes"`
 	RateLimit RateLimitConfig  `yaml:"rate_limit"`
+	Quota     QuotaConfig       `yaml:"quota"`
 	Cache     CacheConfig      `yaml:"cache"`
 	Tracing   TracingConfig    `yaml:"tracing"`
+	Filter    FilterConfig     `yaml:"filter"`
+}
+
+// FilterConfig controls PII / sensitive information filtering.
+type FilterConfig struct {
+	Enabled bool      `yaml:"enabled"`
+	Mode    string    `yaml:"mode"`    // "mask" or "block"
+	Rules   []string  `yaml:"rules"`   // enabled rule names: phone_cn, id_card_cn, email, credit_card, ipv4, api_key, cn_name
 }
 
 // TracingConfig configures OpenTelemetry tracing. All fields are optional; the
@@ -27,9 +36,22 @@ type TracingConfig struct {
 	SampleRatio float64 `yaml:"sample_ratio"` // 0..1, 1 = sample everything
 }
 
+type KeyConfig struct {
+	Token           string `yaml:"token"`
+	Name            string `yaml:"name"`
+	Role            string `yaml:"role"`
+	DailyTokenLimit int64  `yaml:"daily_token_limit"`
+	Models          string `yaml:"models"` // comma-separated allowlist, empty = all
+}
+
 type AuthConfig struct {
-	Enabled bool     `yaml:"enabled"`
-	Keys    []string `yaml:"keys"`
+	Enabled bool        `yaml:"enabled"`
+	Keys    []KeyConfig `yaml:"keys"`
+}
+
+type QuotaConfig struct {
+	Enabled       bool `yaml:"enabled"`
+	ResetHourUTC  int  `yaml:"reset_hour_utc"`
 }
 
 type RateLimitConfig struct {
@@ -51,7 +73,18 @@ type CacheConfig struct {
 }
 
 type ServerConfig struct {
-	Port int `yaml:"port"`
+	Port           int             `yaml:"port"`
+	DBPath         string          `yaml:"db_path"`
+	MaxConcurrency int             `yaml:"max_concurrency"`
+	QueueSize      int             `yaml:"queue_size"`
+	QueueTimeout   time.Duration   `yaml:"queue_timeout"`
+	Transport      TransportConfig `yaml:"transport"`
+}
+
+type TransportConfig struct {
+	MaxConnsPerHost     int `yaml:"max_conns_per_host"`
+	MaxIdleConnsPerHost int `yaml:"max_idle_conns_per_host"`
+	MaxIdleConns        int `yaml:"max_idle_conns"`
 }
 
 type ProviderConfig struct {

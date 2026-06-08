@@ -94,3 +94,74 @@ export interface CacheEntryDetail {
   token_count: number;
   response: Record<string, unknown>;
 }
+
+export interface QuotaEntry {
+  key_id: number;
+  name: string;
+  daily_limit: number;
+  monthly_limit: number;
+  used_tokens: number;
+  remaining_tokens: number;
+  used_monthly: number;
+  remaining_monthly: number;
+  reset_at: number;
+}
+
+export interface QuotasResponse {
+  quotas: QuotaEntry[];
+  enabled: boolean;
+}
+
+export interface KeyInfo {
+  id: number;
+  name: string;
+  role: string;
+  daily_limit: number;
+  monthly_limit: number;
+  models: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KeysResponse {
+  keys: KeyInfo[];
+}
+
+export interface CreateKeyResponse {
+  name: string;
+  token: string;
+}
+
+export interface AuditEntry {
+  id: number;
+  key_name: string;
+  model: string;
+  provider: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  status_code: number;
+  latency_ms: number;
+  stream: boolean;
+  error_message: string;
+  created_at: string;
+}
+
+export interface AuditLogsResponse {
+  logs: AuditEntry[];
+  total: number;
+}
+
+export interface FilterRuleStatus {
+  name: string;
+  label: string;
+  description: string;
+  enabled: boolean;
+}
+
+export interface FilterStatus {
+  enabled: boolean;
+  mode: string;
+  rules: FilterRuleStatus[];
+}

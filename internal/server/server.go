@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os/signal"
@@ -16,9 +17,11 @@ import (
 	"ai-gateway/config"
 	"ai-gateway/internal/breaker"
 	"ai-gateway/internal/cache"
+	"ai-gateway/internal/filter"
 	"ai-gateway/internal/limiter"
 	"ai-gateway/internal/metrics"
 	"ai-gateway/internal/middleware"
+	"ai-gateway/internal/store"
 	"ai-gateway/internal/observer"
 	"ai-gateway/internal/provider"
 	"ai-gateway/internal/retry"
@@ -35,8 +38,16 @@ type Server struct {
 	httpSrv       *http.Server
 	cacheBackend  cache.CacheBackend
 	semanticCache *cache.SemanticCache
-	keyLimiter    *limiter.TokenBucketLimiter
-	modelLimiter  *limiter.TokenBucketLimiter
+	keyLimiter   *limiter.TokenBucketLimiter
+	modelLimiter *limiter.TokenBucketLimiter
+	store        *store.Store
+	piiFilter    *filter.Filter
+
+	// Upstream connection pool shared by all providers.
+	transport *http.Transport
+
+	// Concurrency limiter — rejects or queues requests when at capacity.
+	concurrencyLimiter *middleware.ConcurrencyLimiter
 
 	// Resilience layer — one breaker per provider, one coalescer for the
 	// whole gateway, one shared retry policy. All three are nil-safe to
@@ -67,6 +78,23 @@ func New(cfg *config.Config, r *router.Router, provs map[string]provider.LLMProv
 			MaxDelay:    2 * time.Second,
 		},
 	}
+
+	// Build shared HTTP transport with upstream connection pool limits.
+	tc := cfg.Server.Transport
+	s.transport = provider.NewTransport(tc.MaxConnsPerHost, tc.MaxIdleConnsPerHost, tc.MaxIdleConns)
+	for _, p := range provs {
+		if ts, ok := p.(provider.TransportSetter); ok {
+			ts.SetTransport(s.transport)
+		}
+	}
+
+	// Concurrency limiter: max-in-flight + queue + backpressure.
+	s.concurrencyLimiter = middleware.NewConcurrencyLimiter(
+		cfg.Server.MaxConcurrency,
+		cfg.Server.QueueSize,
+		cfg.Server.QueueTimeout,
+		logger,
+	)
 
 	// Setup cache
 	if cfg.Cache.Enabled {
@@ -115,6 +143,40 @@ func New(cfg *config.Config, r *router.Router, provs map[string]provider.LLMProv
 		}
 	}
 
+	// Open SQLite store for API keys and quota persistence.
+	// When db_path is empty or ":memory:", skip store (in-memory fallback
+	// for tests / ephemeral deployments).
+	dbPath := cfg.Server.DBPath
+	if dbPath == "" {
+		dbPath = "data/gateway.db"
+	}
+	st, err := store.Open(dbPath)
+	if err != nil {
+		// Running tests or ephemeral setup without a writable filesystem.
+		// Store is optional — without it, auth falls back to config keys only.
+		logger.Warn("store unavailable, key management disabled", "error", err)
+	} else {
+		s.store = st
+			st.StartAuditCleanup(logger, 30)
+	}
+
+	// Seed keys from config on first run.
+	if s.store != nil && cfg.Auth.Enabled {
+		for _, k := range cfg.Auth.Keys {
+			if err := s.store.SeedKey(k.Token, k.Name, k.Role, k.Models, k.DailyTokenLimit); err != nil {
+				return nil, fmt.Errorf("seed key %q: %w", k.Name, err)
+			}
+		}
+	}
+
+
+		// PII / sensitive information filter.
+		if cfg.Filter.Enabled {
+			s.piiFilter = filter.New(cfg.Filter.Rules, filter.Mode(cfg.Filter.Mode))
+			if s.piiFilter != nil {
+				logger.Info("pii filter enabled", "mode", cfg.Filter.Mode, "rules", cfg.Filter.Rules)
+			}
+		}
 	adminMux := s.adminRoutes()
 	mainMux := http.NewServeMux()
 	mainMux.HandleFunc("POST /v1/chat/completions", s.handleChatCompletion)
@@ -124,11 +186,30 @@ func New(cfg *config.Config, r *router.Router, provs map[string]provider.LLMProv
 	mainMux.Handle("GET /metrics", metrics.Register())
 
 	handler := withRecovery(logger, mainMux)
+	if s.concurrencyLimiter != nil {
+		handler = s.concurrencyLimiter.Wrap(handler)
+	}
 	handler = middleware.WithMetrics(logger, handler)
 	handler = inFlightInstrumented(handler)
 
-	if cfg.Auth.Enabled && len(cfg.Auth.Keys) > 0 {
-		handler = middleware.NewAuth(cfg.Auth.Keys).Wrap(logger, handler)
+	// QuotaCheck is inner — Auth must run first to set identity.
+	if cfg.Quota.Enabled && cfg.Auth.Enabled {
+		handler = middleware.QuotaCheck(s.store, logger, handler)
+	}
+
+	if cfg.Auth.Enabled {
+		authMw := middleware.NewAuth(s.store)
+		if authMw == nil {
+			// Fallback to config-based keys when store is unavailable.
+			cKeys := make([]middleware.ConfigKey, len(cfg.Auth.Keys))
+			for i, k := range cfg.Auth.Keys {
+				cKeys[i] = middleware.ConfigKey{Token: k.Token, Name: k.Name, Role: k.Role, DailyLimit: k.DailyTokenLimit, Models: k.Models}
+			}
+			authMw = middleware.NewAuthFromConfig(cKeys)
+		}
+		if authMw != nil {
+			handler = authMw.Wrap(logger, handler)
+		}
 	}
 
 	if cfg.RateLimit.Enabled {
@@ -188,6 +269,13 @@ func (s *Server) Reload(cfg *config.Config) error {
 		}
 	}
 
+	// Apply shared transport to new providers.
+	for _, p := range newProvs {
+		if ts, ok := p.(provider.TransportSetter); ok {
+			ts.SetTransport(s.transport)
+		}
+	}
+
 	// Build new router
 	newRouter, err := router.NewRouter(cfg.Routes)
 	if err != nil {
@@ -220,6 +308,8 @@ func (s *Server) Reload(cfg *config.Config) error {
 }
 
 func (s *Server) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+
 	// gateway.handle is the root span for the request. We propagate
 	// W3C traceparent from the incoming request so this span links to the
 	// caller's trace (e.g. an upstream service that already started one).
@@ -228,10 +318,35 @@ func (s *Server) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	r = r.WithContext(ctx)
 
 	var req provider.ChatRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 2<<20)).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	// Apply PII filter to request messages.
+	if s.piiFilter != nil {
+		for i := range req.Messages {
+			if req.Messages[i].Role == "system" || req.Messages[i].Role == "user" {
+				cleaned, triggered, err := s.piiFilter.Apply(req.Messages[i].Content)
+				if err != nil {
+					s.logger.Warn("pii filter blocked request", "triggered", triggered)
+					http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+					return
+				}
+				if len(triggered) > 0 {
+					s.logger.Info("pii masked in request", "triggered", triggered)
+					req.Messages[i].Content = cleaned
+				}
+			}
+		}
+	}
+
+	// Check model access — if the key has a model allowlist, enforce it.
+	if id := middleware.IdentityFromCtx(r.Context()); id != nil && !id.AllowedModel(req.Model) {
+		http.Error(w, "forbidden: model not allowed for this key", http.StatusForbidden)
+		return
+	}
+
 	span.SetAttributes(otelAttrString("llm.model", req.Model), otelAttrBool("llm.stream", req.Stream))
 
 	recordReq()
@@ -248,6 +363,8 @@ func (s *Server) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 		if resp, hit := s.cacheBackend.Get(key); hit {
 			recordHit()
 			s.logger.Info("cache hit", "model", req.Model)
+			s.auditLog(r, req.Model, "cache", resp.Usage.PromptTokens, resp.Usage.CompletionTokens,
+				resp.Usage.TotalTokens, http.StatusOK, time.Since(start).Milliseconds(), false, "")
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(resp)
 			return
@@ -260,6 +377,8 @@ func (s *Server) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 		if resp, hit := s.semanticCache.GetSimilar(&req); hit {
 			recordHit()
 			s.logger.Info("semantic cache hit", "model", req.Model)
+			s.auditLog(r, req.Model, "cache", resp.Usage.PromptTokens, resp.Usage.CompletionTokens,
+				resp.Usage.TotalTokens, http.StatusOK, time.Since(start).Milliseconds(), false, "")
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(resp)
 			return
@@ -274,6 +393,7 @@ func (s *Server) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	routeSpan.End()
 	if err != nil {
 		s.logger.Warn("routing failed", "model", req.Model, "error", err)
+		s.auditLog(r, req.Model, "", 0, 0, 0, http.StatusNotFound, time.Since(start).Milliseconds(), false, err.Error())
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
@@ -305,9 +425,22 @@ func (s *Server) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 		metrics.UpstreamErrorsTotal.WithLabelValues(target.Provider).Inc()
 		s.logger.Error("upstream call failed", "error", err)
 		obs.Finalize(s.logger, 0, 0, false, http.StatusBadGateway)
+		s.auditLog(r, originalModel, target.Provider, 0, 0, 0,
+			s.statusFor(err), time.Since(start).Milliseconds(), false, err.Error())
 		http.Error(w, err.Error(), s.statusFor(err))
 		return
 	}
+
+		// Apply PII filter to response content before caching.
+		if s.piiFilter != nil && resp != nil {
+			for i := range resp.Choices {
+				cleaned, triggered, _ := s.piiFilter.Apply(resp.Choices[i].Message.Content)
+				if len(triggered) > 0 {
+					s.logger.Info("pii masked in response", "triggered", triggered)
+					resp.Choices[i].Message.Content = cleaned
+				}
+			}
+		}
 
 	// Store in cache — use sfKey (computed before routing mutated req.Model)
 	// so lookup and storage always use the same key.
@@ -319,6 +452,20 @@ func (s *Server) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	}
 
 	obs.Finalize(s.logger, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, false, http.StatusOK)
+
+	// Record token usage for quota tracking
+	if s.store != nil {
+		identity := middleware.IdentityFromCtx(r.Context())
+		if identity != nil {
+			if err := s.store.RecordUsage(identity.ID, resp.Usage.TotalTokens); err != nil {
+				s.logger.Error("record quota usage failed", "error", err)
+			}
+		}
+	}
+
+	// Audit log: successful request
+	s.auditLog(r, originalModel, target.Provider, resp.Usage.PromptTokens, resp.Usage.CompletionTokens,
+		resp.Usage.TotalTokens, http.StatusOK, time.Since(start).Milliseconds(), false, "")
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
@@ -478,6 +625,33 @@ func (s *Server) statusFor(err error) int {
 	return http.StatusBadGateway
 }
 
+// auditLog inserts an audit entry for a completed request. Errors are logged
+// but never fail the request — auditing is best-effort.
+func (s *Server) auditLog(r *http.Request, model, provider string, promptTokens, completionTokens, totalTokens int, statusCode int, latencyMs int64, stream bool, errMsg string) {
+	if s.store == nil {
+		return
+	}
+	identity := middleware.IdentityFromCtx(r.Context())
+	keyName := ""
+	if identity != nil {
+		keyName = identity.Name
+	}
+	if err := s.store.InsertAudit(&store.AuditEntry{
+		KeyName:          keyName,
+		Model:            model,
+		Provider:         provider,
+		PromptTokens:     promptTokens,
+		CompletionTokens: completionTokens,
+		TotalTokens:      totalTokens,
+		StatusCode:       statusCode,
+		LatencyMs:        latencyMs,
+		Stream:           stream,
+		ErrorMessage:     errMsg,
+	}); err != nil {
+		s.logger.Error("audit log insert failed", "error", err)
+	}
+}
+
 // handleStreamCompletion serves an SSE stream. The design goals are:
 //
 //  1. Cache parity with non-streaming: a cached response is replayed as an
@@ -491,6 +665,8 @@ func (s *Server) statusFor(err error) int {
 //  4. Fallback parity with non-streaming: if the upstream call itself fails
 //     before any chunk is sent we transparently try the next provider.
 func (s *Server) handleStreamCompletion(w http.ResponseWriter, r *http.Request, req *provider.ChatRequest) {
+	streamStart := time.Now()
+
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
@@ -505,6 +681,8 @@ func (s *Server) handleStreamCompletion(w http.ResponseWriter, r *http.Request, 
 		if resp, hit := s.cacheBackend.Get(origCacheKey); hit {
 			recordHit()
 			s.logger.Info("stream cache hit", "model", req.Model)
+			s.auditLog(r, req.Model, "cache", resp.Usage.PromptTokens, resp.Usage.CompletionTokens,
+				resp.Usage.TotalTokens, http.StatusOK, time.Since(streamStart).Milliseconds(), true, "")
 			s.replayCachedAsStream(w, resp)
 			return
 		}
@@ -514,6 +692,8 @@ func (s *Server) handleStreamCompletion(w http.ResponseWriter, r *http.Request, 
 		if resp, hit := s.semanticCache.GetSimilar(req); hit {
 			recordHit()
 			s.logger.Info("stream semantic cache hit", "model", req.Model)
+			s.auditLog(r, req.Model, "cache", resp.Usage.PromptTokens, resp.Usage.CompletionTokens,
+				resp.Usage.TotalTokens, http.StatusOK, time.Since(streamStart).Milliseconds(), true, "")
 			s.replayCachedAsStream(w, resp)
 			return
 		}
@@ -528,6 +708,7 @@ func (s *Server) handleStreamCompletion(w http.ResponseWriter, r *http.Request, 
 	routeSpan.End()
 	if err != nil {
 		s.logger.Warn("routing failed", "model", req.Model, "error", err)
+		s.auditLog(r, req.Model, "", 0, 0, 0, http.StatusNotFound, time.Since(streamStart).Milliseconds(), true, err.Error())
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
@@ -565,6 +746,8 @@ func (s *Server) handleStreamCompletion(w http.ResponseWriter, r *http.Request, 
 		recordError()
 		metrics.UpstreamErrorsTotal.WithLabelValues(usedTarget.Provider).Inc()
 		s.logger.Error("upstream stream call failed", "error", err)
+		s.auditLog(r, originalModel, usedTarget.Provider, 0, 0, 0,
+			s.statusFor(err), time.Since(streamStart).Milliseconds(), true, err.Error())
 		http.Error(w, err.Error(), s.statusFor(err))
 		return
 	}
@@ -594,6 +777,17 @@ func (s *Server) handleStreamCompletion(w http.ResponseWriter, r *http.Request, 
 		defer close(clientCh)
 		defer close(collectorCh)
 		for chunk := range upstream {
+			// Filter PII from each stream chunk delta.
+			if s.piiFilter != nil {
+				for i := range chunk.Choices {
+					if chunk.Choices[i].Delta.Content != "" {
+						cleaned, triggered, _ := s.piiFilter.Apply(chunk.Choices[i].Delta.Content)
+						if len(triggered) > 0 {
+							chunk.Choices[i].Delta.Content = cleaned
+						}
+					}
+				}
+			}
 			select {
 			case clientCh <- chunk:
 			case <-ctx.Done():
@@ -676,6 +870,20 @@ func (s *Server) handleStreamCompletion(w http.ResponseWriter, r *http.Request, 
 	}
 
 	obs.Finalize(s.logger, promptTokens, completionTokens, false, http.StatusOK)
+
+	// Record token usage for quota tracking
+	if s.store != nil {
+		identity := middleware.IdentityFromCtx(r.Context())
+		if identity != nil {
+			if err := s.store.RecordUsage(identity.ID, promptTokens+completionTokens); err != nil {
+				s.logger.Error("record quota usage failed", "error", err)
+			}
+		}
+	}
+		// Audit log: successful stream request
+		totalTokens := promptTokens + completionTokens
+		s.auditLog(r, originalModel, usedTarget.Provider, promptTokens, completionTokens,
+			totalTokens, http.StatusOK, time.Since(streamStart).Milliseconds(), true, "")
 }
 
 // openStreamWithFallback walks the fallback chain trying each provider until
