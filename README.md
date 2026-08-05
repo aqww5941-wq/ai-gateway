@@ -54,25 +54,25 @@ export DOUBAO_API_KEY=...
 ./bin/gateway -config /path/to.yaml    # 指定配置文件
 ```
 
-网关监听 `:8080`，管理后台 `http://localhost:8080/admin/dashboard/`。
+网关监听 `:8081`，管理后台 `http://localhost:8081/admin/dashboard/`。
 
 ### 4. 第一个请求
 
 ```bash
 # 非流式
-curl -X POST http://localhost:8080/v1/chat/completions \
+curl -X POST http://localhost:8081/v1/chat/completions \
   -H "Authorization: Bearer sk-test-123" \
   -H "Content-Type: application/json" \
   -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"你好"}]}'
 
 # 流式
-curl -N -X POST http://localhost:8080/v1/chat/completions \
+curl -N -X POST http://localhost:8081/v1/chat/completions \
   -H "Authorization: Bearer sk-test-123" \
   -H "Content-Type: application/json" \
   -d '{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"讲个笑话"}]}'
 
 # 语义路由 — simple → mini, complex → pro
-curl -X POST http://localhost:8080/v1/chat/completions \
+curl -X POST http://localhost:8081/v1/chat/completions \
   -H "Authorization: Bearer sk-test-123" \
   -H "Content-Type: application/json" \
   -d '{"model":"doubao","messages":[{"role":"user","content":"用 Go 实现红黑树"}]}'
@@ -118,7 +118,7 @@ Upstream LLM APIs
 
 ```yaml
 server:
-  port: 8080
+  port: 8081
   db_path: data/gateway.db          # SQLite 路径
   max_concurrency: 500              # 最大并发请求数
   queue_size: 200                   # 等待队列长度
@@ -172,7 +172,7 @@ rate_limit:
 
 ## 管理后台
 
-启动后访问 `http://localhost:8080/admin/dashboard/`，使用 admin 角色的 API Key 登录。
+启动后访问 `http://localhost:8081/admin/dashboard/`，使用 admin 角色的 API Key 登录。
 
 | 页面 | 功能 |
 | --- | --- |
@@ -283,7 +283,7 @@ FROM alpine:3.21
 RUN apk add --no-cache ca-certificates
 COPY --from=builder /app/gateway /usr/local/bin/gateway
 COPY --from=builder /app/config/gateway.yaml /etc/gateway/config.yaml
-EXPOSE 8080
+EXPOSE 8081
 CMD ["gateway", "-config", "/etc/gateway/config.yaml"]
 ```
 
