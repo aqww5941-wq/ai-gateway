@@ -43,10 +43,11 @@ OpenAI-compatible Client Protocol
 1. 当前用户明确要求。
 2. 根 `AGENTS.md` 与匹配的 `.rules/`。
 3. `docs/AI_Gateway_v3_企业级重构设计文档.md` 的架构决策、里程碑和 Exit Gate。
-4. ADR、OpenAPI/Schema、迁移说明和配置契约。
-5. 对应厂商的当前官方 API 文档与已脱敏实测记录。
-6. 测试表达的已确认行为。
-7. 当前实现和 `README.md`。
+4. `docs/AI_Gateway_v3_项目实施任务书.md` 的 Task 顺序、依赖、范围和验收。
+5. ADR、OpenAPI/Schema、迁移说明和配置契约。
+6. 对应厂商的当前官方 API 文档与已脱敏实测记录。
+7. 测试表达的已确认行为。
+8. 当前实现和 `README.md`。
 
 当前代码只说明“现在如何运行”，不能证明“应该继续这样设计”。测试若固化了与新设计冲突的旧行为，应先说明契约变化，再同步更新。
 
@@ -61,6 +62,8 @@ OpenAI-compatible Client Protocol
 - M6 多实例、故障注入、真实调用方和可复现性能报告。
 
 必须满足当前里程碑 Exit Gate 才能把下一阶段作为主线。允许提前做研究或 Spike，但不得把未完成依赖包装成正式能力。
+
+具体实施拆为 Task 1～Task 62。同一时间只允许一个 Task 进入实现；若发现必要的计划外工作，按任务书插入 Remediation Task，不得顺带扩大当前 Task。
 
 ## 6. 当前优先风险
 

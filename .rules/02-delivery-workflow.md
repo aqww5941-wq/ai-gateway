@@ -5,8 +5,9 @@
 1. 运行 `git status --short` 和 `git branch --show-current`。
 2. 把已有修改视为用户资产；不得清理、覆盖、回滚或顺带提交。
 3. 阅读根规则、所有命中的场景规则、相关设计、入口、调用方和测试。
-4. 先写根因、影响范围、方案和验证计划，再编辑。
-5. 若当前实现与设计冲突，先判断是迁移中的已知差异还是设计变更，不自行猜测。
+4. v3 实现先确认任务书中唯一 Ready Task 及其全部依赖；一次只实施一个 Task。
+5. 先写根因、影响范围、方案和验证计划，再编辑。
+6. 若当前实现与设计冲突，先判断是迁移中的已知差异还是设计变更，不自行猜测。
 
 ## 2. 实现要求
 
@@ -16,6 +17,7 @@
 - API、配置、Schema、数据：同步契约、示例、迁移、兼容和回滚说明。
 - Provider：同步 Capability、Golden、SSE Replay、Error Mapping 和 Conformance。
 - 不把格式化、依赖升级或构建生成的无关变化混入任务。
+- 不把多个 Task 合并成大提交。发现当前 Task 必需的计划外工作时，先在任务书增加 Remediation Task，再实施。
 
 ## 3. 验证分级
 
@@ -60,6 +62,7 @@ changelog/YYYYMMDD-HHmm-<lowercase-kebab-slug>.md
 2. 使用 `git add -- <显式文件列表>`，禁止 `git add .` 或 `git add -A`。
 3. 检查 `git diff --cached --check` 和完整 staged diff。
 4. 确认未包含用户无关修改、秘密和生成噪音。
+5. 同步把当前 Task 标记为 Done、下一 Task 标记为 Ready；若验收未通过，不更新为 Done。
 
 提交格式为 `<type>(<scope>): <imperative summary>`。默认不 push、force push、rebase、amend 或修改 Git 用户配置。存在验证失败、疑似秘密、重叠修改或无法区分归属时，保留工作树并说明阻塞，不强行提交。
 

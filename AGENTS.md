@@ -1,6 +1,6 @@
 # AI Gateway Agent 工作入口
 
-本文件是所有 Agent 进入仓库后的唯一入口。项目事实、工程约束和场景规则位于 `.rules/`；架构目标位于 `docs/AI_Gateway_v3_企业级重构设计文档.md`。
+本文件是所有 Agent 进入仓库后的唯一入口。项目事实、工程约束和场景规则位于 `.rules/`；架构目标位于 `docs/AI_Gateway_v3_企业级重构设计文档.md`；逐项实施顺序位于 `docs/AI_Gateway_v3_项目实施任务书.md`。
 
 ## 1. 当前任务与目标架构
 
@@ -10,6 +10,7 @@
 - 首批真实上游固定为火山引擎方舟、DeepSeek、阿里云百炼 Qwen。客户端入口可以兼容 OpenAI Chat Completions/Responses，但不得把“协议兼容”写成“已接入 OpenAI 厂商”。
 - 每个厂商必须有独立 Adapter、能力矩阵、Golden/Conformance Fixture 和可选真实 API Smoke Test；禁止用一个通用 OpenAI-compatible 转发器冒充完整适配。
 - 新协议能力进入 Canonical IR、Capability Planner 和 Adapter 边界，不得继续把厂商字段堆入旧 `provider.ChatRequest`。
+- v3 实施必须按任务书 Task 1～Task 62 顺序推进。同一时间只允许一个 Task 进入实现；当前 Task 验收、changelog 和原子提交完成后才能开始下一项。
 
 ## 2. M0 是什么
 
@@ -25,11 +26,12 @@ M0 必须固定当前行为并解决构建、配置、安全示例、测试、CI
 2. 完整阅读 `.rules/00-project.md`。
 3. 修改文件时完整阅读 `.rules/01-engineering-principles.md`、`.rules/02-delivery-workflow.md` 和所有命中的场景规则。
 4. 修改运行时代码时额外阅读 `.rules/03-observability.md`。
-5. 修改前写清：现象、触发条件、根因、影响范围、设计方案和验证方式。禁止未定位根因就止血式修补。
-6. 实现完整方案，同步测试、诊断日志、指标、Trace、配置、文档或迁移。
-7. 按风险验证；未执行或未通过的检查必须如实记录。
-8. 代码、配置契约、数据库、API、构建、测试行为或治理规则变化时，在 `changelog/` 新建记录。
-9. 只暂存本任务文件并创建一个原子本地提交。默认不 push，不覆盖用户修改。
+5. v3 实现任务读取 `docs/AI_Gateway_v3_项目实施任务书.md`，确认唯一 Ready Task、依赖、范围、验收和禁止项；不得跳 Task 或把多个 Task 合成一次大改。
+6. 修改前写清：现象、触发条件、根因、影响范围、设计方案和验证方式。禁止未定位根因就止血式修补。
+7. 实现完整方案，同步测试、诊断日志、指标、Trace、配置、文档或迁移。
+8. 按风险验证；未执行或未通过的检查必须如实记录。
+9. 代码、配置契约、数据库、API、构建、测试行为或治理规则变化时，在 `changelog/` 新建记录。
+10. 只暂存本 Task 文件并创建一个原子本地提交。默认不 push，不覆盖用户修改。
 
 纯阅读、分析或代码审查不生成 changelog，也不提交。
 
