@@ -1,8 +1,8 @@
 # AI Gateway
 
-一个正在按 v3 任务书演进的 Go LLM Gateway。当前处于 **M0 可信基线** 阶段：已有
+一个正在按 v3 任务书演进的 Go LLM Gateway。当前已通过 **M0 可信基线** Exit Gate：已有
 `net/http` 数据入口、React 管理端、配置、路由、缓存、重试、熔断、鉴权、Quota、审计和
-可观测代码，但 M0 Exit Gate 尚未执行，因此本仓库当前不声明“生产级”“企业级”或“全厂商兼容”。
+可观测代码。M0 只证明仓库具备安全开始架构迁移的工程基线，本仓库仍不声明“生产级”“企业级”或“全厂商兼容”。
 
 ## 事实等级
 
@@ -187,7 +187,7 @@ Memory/Redis 与 Exact/Semantic；已有 Prometheus、OpenTelemetry 和结构化
 
 ## 已知限制
 
-- M0 Exit Gate（Task 10）尚未执行，当前不能作为生产就绪结论。
+- M0 Exit Gate 只证明可信迁移基线；M1～M6 尚未完成，当前不能作为生产就绪结论。
 - 数据面、管理端、Metrics 共用端口；没有独立控制面、liveness 或 readiness。
 - Chat/SSE 仍使用文本最小模型；上游 SSE 解析或扫描失败目前可能被表现为 Channel 正常关闭和
   `[DONE]`，不能据此证明流完整成功。

@@ -72,8 +72,8 @@ v3 设计定义“最终要成为什么”，本任务书定义“从当前代�
 
 | 阶段 | Task | 结果 | 主线状态 |
 | --- | --- | --- | --- |
-| M0 可信基线 | 1～10 | 构建、配置、安全、测试和 CI 可信 | Task 1～9 Done；Task 10 In Progress |
-| M1 Gin 与应用边界 | 11～18 | 双平面 Gin，核心与框架解耦 | Pending |
+| M0 可信基线 | 1～10 | 构建、配置、安全、测试和 CI 可信 | Passed；Task 1～10 Done |
+| M1 Gin 与应用边界 | 11～18 | 双平面 Gin，核心与框架解耦 | Task 11 Ready |
 | M2 Canonical 与双 Ingress | 19～27 | Chat/Responses 进入同一语义模型 | Pending |
 | M3 国内三厂商 | 28～36 | 方舟、DeepSeek、Qwen 可合约与真实验证 | Pending |
 | M4 路由与韧性 | 37～44 | 能力等价路由、Retry/Fallback/Breaker 正确 | Pending |
@@ -189,7 +189,7 @@ v3 设计定义“最终要成为什么”，本任务书定义“从当前代�
 
 ### Task 10：执行 M0 Exit Gate
 
-- **状态：** In Progress（全新检出 Gate 执行中）
+- **状态：** Done
 - **依赖：** Task 1～Task 9
 - **目标：** 证明仓库已经具备安全开始架构迁移的可信地基。
 - **交付：** `docs/gates/M0.md`，记录环境、命令、结果、残余风险和下一阶段许可。
@@ -214,7 +214,7 @@ v3 设计定义“最终要成为什么”，本任务书定义“从当前代�
 
 ### Task 11：确定 Gin 双平面与应用边界 ADR
 
-- **状态：** Pending
+- **状态：** Ready
 - **依赖：** Task 10
 - **目标：** 在编码前固定 Engine、端口、Middleware、DTO、SSE 和依赖方向。
 - **交付：** ADR：双 `gin.Engine`/双 `http.Server`、`gin.Context` 边界、错误 Envelope、迁移与回滚方案、依赖选择依据。

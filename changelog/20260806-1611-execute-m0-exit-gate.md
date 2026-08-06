@@ -31,7 +31,8 @@ Gate 采用两阶段状态：本地门禁通过但最新 HEAD 未有远端 CI �
 - `[通过]` Format、全仓 Test、Vet、Staticcheck v0.7.0、Actionlint v1.7.12、WSL 全仓 Race。
 - `[通过]` Frontend ESLint、6 个 Vitest、TypeScript、Vite Build。
 - `[通过]` Gitleaks v8.27.2，无真实 Provider API 调用。
-- `[待外部验证]` 最新 HEAD 的 GitHub-hosted `Quality` Workflow；未获得 push 授权前不伪造结论。
+- `[通过]` GitHub-hosted [`Quality` #31084263262](https://github.com/aqww5941-wq/ai-gateway/actions/runs/31084263262) 在 Head `06a841d85efad1c2258c8c6213e48e66a16187b1` 上全绿：Go quality、Frontend quality、Secret scan 均为 `success`。
+- `[结论]` Task 10 Done，M0 Passed，Task 11 Ready。
 
 ## 风险与回滚
 
