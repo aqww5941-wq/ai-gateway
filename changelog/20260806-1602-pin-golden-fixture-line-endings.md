@@ -24,7 +24,8 @@ Gateway 运行时、API、配置、数据库和错误文本均不变。只改变
 ## 验证
 
 - `[通过]` 主/全新工作树字节对比已证明根因：主工作树 `CR=0, LF=2`，旧全新检出 `CR=2, LF=2`。
-- `[通过]` 从包含新规则的暂存区执行全新候选检出：Fixture `CR=0, LF=2`，`go test -count=1 ./...` 全部通过。提交后的 detached worktree 全量重验继续由 Task 10 Gate 执行。
+- `[通过]` 从包含新规则的暂存区执行全新候选检出：Fixture `CR=0, LF=2`，`go test -count=1 ./...` 全部通过。
+- `[通过]` 提交 `e7e4fd8` 后新建 detached Windows worktree：Fixture 仍为 `CR=0, LF=2`，完整构建、全仓 Test/Race/Vet/Staticcheck 与前端门禁全部通过。
 
 ## 风险与回滚
 
