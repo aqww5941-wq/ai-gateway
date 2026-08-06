@@ -58,3 +58,10 @@ git status --short
 Windows 可以使用 `Get-FileHash -Algorithm SHA256`，Linux/macOS 可以使用
 `sha256sum` 生成清单。预期的源码或生成产物变更应在提交中明确出现，不能用忽略规则
 隐藏。
+
+## 质量门禁
+
+构建成功不是完整质量结论。Go Format/Test/Race/Vet/Staticcheck、前端
+lint/test/typecheck/build、Secret Scan 和 GitHub Actions 的本地等价命令统一记录在
+[`docs/quality-gates.md`](quality-gates.md)。依赖或工作流调整时必须同步更新该文档和
+`.github/workflows/quality.yml`，且构建后仍需确认 `internal/static/dist` 没有非预期差异。

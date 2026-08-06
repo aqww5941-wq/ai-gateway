@@ -3,9 +3,19 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "packageManager": "npm@10.9.2",
+  "engines": {
+    "node": ">=22.14 <23",
+    "npm": ">=10.9 <11"
+  },
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "check:types": "tsc --noEmit",
+    "lint": "eslint \"src/**/*.{ts,tsx}\" --max-warnings 0",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build": "npm run check:types && vite build",
+    "quality": "npm run lint && npm run test && npm run build",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -22,14 +32,21 @@
     "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
+    "@eslint/js": "10.0.1",
     "@types/node": "^25.9.2",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.4.0",
     "autoprefixer": "^10.5.0",
+    "eslint": "10.8.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "eslint-plugin-react-refresh": "0.5.3",
+    "globals": "17.9.0",
     "postcss": "^8.5.15",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.8.0",
-    "vite": "^6.3.0"
+    "typescript-eslint": "8.66.0",
+    "vite": "^6.3.0",
+    "vitest": "4.1.10"
   }
 }

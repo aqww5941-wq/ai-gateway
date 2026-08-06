@@ -72,7 +72,7 @@ v3 设计定义“最终要成为什么”，本任务书定义“从当前代�
 
 | 阶段 | Task | 结果 | 主线状态 |
 | --- | --- | --- | --- |
-| M0 可信基线 | 1～10 | 构建、配置、安全、测试和 CI 可信 | Task 1～7 Done；Task 8 Ready |
+| M0 可信基线 | 1～10 | 构建、配置、安全、测试和 CI 可信 | Task 1～7 Done；Task 8 In Progress（等待首次远端 CI） |
 | M1 Gin 与应用边界 | 11～18 | 双平面 Gin，核心与框架解耦 | Pending |
 | M2 Canonical 与双 Ingress | 19～27 | Chat/Responses 进入同一语义模型 | Pending |
 | M3 国内三厂商 | 28～36 | 方舟、DeepSeek、Qwen 可合约与真实验证 | Pending |
@@ -158,13 +158,24 @@ v3 设计定义“最终要成为什么”，本任务书定义“从当前代�
 
 ### Task 8：建立后端与前端质量门禁
 
-- **状态：** Ready
+- **状态：** In Progress（本地门禁通过，等待首次远端 CI）
 - **依赖：** Task 2、Task 3、Task 6、Task 7
 - **目标：** 所有后续 Task 有自动、可重复的最低质量门槛。
 - **交付：** CI 工作流；Go format/test/race/vet/build、静态分析、Secret Scan；前端 lint/test/build 脚本和最小测试框架；依赖缓存不影响正确性。
 - **验收：** 新提交自动执行；任一故意制造的格式、测试、Secret 或构建错误会使 CI 失败；任务产物不污染 Git。
 - **验证：** 本地等价命令和 CI 首次成功记录。
 - **不包含：** Adapter Conformance、Migration Integration 和 Docker Smoke，后续增量加入。
+
+### Task 8.R1：修复跨平台 Go Format 基线
+
+- **状态：** Done
+- **依赖：** Task 8 的 Format Gate 审计
+- **根因：** 历史 Go 文件使用 CRLF，原生 `gofmt -l` 会把平台 EOL 与真实结构格式混为同一失败；进一步规范化 EOL 后仍有 14 个文件存在真实 gofmt 差异。直接改写全部文件会制造整文件换行噪音，维护豁免名单又会漏掉未来错误。
+- **目标：** 用一个跨平台事实源区分 EOL 与 gofmt 结构，并清零真实格式债务。
+- **交付：** `cmd/quality` Format Checker 及 LF/CRLF/invalid/unformatted 测试；保留原 EOL 的 `-write` 修复模式；14 个既有文件只应用真实 gofmt 差异。
+- **验收：** Windows/Unix checkout 得到同一判定；CRLF 不误报；真实未格式化和非法 Go 必须失败；修复不产生整文件 EOL diff。
+- **验证：** `go test ./cmd/quality`、`go run ./cmd/quality`、负向 Format Probe、全仓 Test/Race/Vet/Staticcheck。
+- **不包含：** 业务逻辑重构或全仓换行迁移。
 
 ### Task 9：校准 README、运行说明与事实等级
 

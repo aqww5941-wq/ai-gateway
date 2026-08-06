@@ -37,11 +37,11 @@ func (e *UpstreamError) Error() string {
 // instances, so a separate caller-side check handles those.
 func (e *UpstreamError) IsRetryable() bool {
 	switch e.StatusCode {
-	case http.StatusTooManyRequests,         // 429
-		http.StatusBadGateway,                // 502
-		http.StatusServiceUnavailable,        // 503
-		http.StatusGatewayTimeout,            // 504
-		http.StatusRequestTimeout:            // 408 — sometimes used by LB
+	case http.StatusTooManyRequests, // 429
+		http.StatusBadGateway,         // 502
+		http.StatusServiceUnavailable, // 503
+		http.StatusGatewayTimeout,     // 504
+		http.StatusRequestTimeout:     // 408 — sometimes used by LB
 		return true
 	}
 	return false

@@ -44,7 +44,7 @@ func NewOpenAI(cfg config.ProviderConfig, logger *slog.Logger) (*OpenAIProvider,
 	}, nil
 }
 
-func (p *OpenAIProvider) Name() string             { return p.name }
+func (p *OpenAIProvider) Name() string              { return p.name }
 func (p *OpenAIProvider) SupportedModels() []string { return p.models }
 
 func (p *OpenAIProvider) SetTransport(rt *http.Transport) {

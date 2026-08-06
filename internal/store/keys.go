@@ -12,15 +12,15 @@ import (
 )
 
 type KeyInfo struct {
-	ID            int64  `json:"id"`
-	Name          string `json:"name"`
-	Role          string `json:"role"`
-	DailyLimit    int64  `json:"daily_limit"`
-	MonthlyLimit  int64  `json:"monthly_limit"`
-	Models        string `json:"models"`
-	IsActive      bool   `json:"is_active"`
-	CreatedAt     string `json:"created_at"`
-	UpdatedAt     string `json:"updated_at"`
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	Role         string `json:"role"`
+	DailyLimit   int64  `json:"daily_limit"`
+	MonthlyLimit int64  `json:"monthly_limit"`
+	Models       string `json:"models"`
+	IsActive     bool   `json:"is_active"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 type KeyIdentity struct {

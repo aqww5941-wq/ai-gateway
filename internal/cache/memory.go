@@ -195,11 +195,11 @@ func (c *MemoryCache) Info() []CacheEntryInfo {
 
 // CacheEntryDetail is the full cache entry including the response body.
 type CacheEntryDetail struct {
-	Key        string                  `json:"key"`
-	Model      string                  `json:"model"`
-	ExpiresAt  time.Time               `json:"expires_at"`
-	TokenCount int                     `json:"token_count"`
-	Response   *provider.ChatResponse  `json:"response"`
+	Key        string                 `json:"key"`
+	Model      string                 `json:"model"`
+	ExpiresAt  time.Time              `json:"expires_at"`
+	TokenCount int                    `json:"token_count"`
+	Response   *provider.ChatResponse `json:"response"`
 }
 
 // Entry returns the full detail for a single cache key, or false if not found.

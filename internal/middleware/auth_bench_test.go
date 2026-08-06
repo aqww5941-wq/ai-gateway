@@ -47,8 +47,8 @@ func authAllowLinear(token string, keys []string) bool {
 	return false
 }
 
-func BenchmarkAuthAllow_Linear_10Keys(b *testing.B)    { benchAuthLinear(b, 10) }
-func BenchmarkAuthAllow_Linear_1000Keys(b *testing.B)  { benchAuthLinear(b, 1000) }
+func BenchmarkAuthAllow_Linear_10Keys(b *testing.B)   { benchAuthLinear(b, 10) }
+func BenchmarkAuthAllow_Linear_1000Keys(b *testing.B) { benchAuthLinear(b, 1000) }
 
 func benchAuthLinear(b *testing.B, n int) {
 	keys := make([]string, n)

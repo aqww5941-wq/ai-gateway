@@ -82,10 +82,7 @@ func IsRetryable(err error) bool {
 	}
 	// Anything that looks like a transient network failure.
 	var nerr net.Error
-	if errors.As(err, &nerr) {
-		return true
-	}
-	return false
+	return errors.As(err, &nerr)
 }
 
 // Do runs fn under the retry policy, returning the final result and error.

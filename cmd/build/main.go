@@ -140,15 +140,19 @@ func findGoTool() (string, error) {
 	if runtime.GOOS == "windows" {
 		name = "go.exe"
 	}
+	path, pathErr := exec.LookPath(name)
+	if pathErr == nil {
+		return path, nil
+	}
+	// cmd/build is an ephemeral, same-host build runner. This fallback keeps
+	// absolute `go run ./cmd/build` invocations working when Go is not on PATH;
+	// the resulting helper binary is never distributed to another machine.
+	//lint:ignore SA1019 see the same-host build-runner invariant above
 	candidate := filepath.Join(runtime.GOROOT(), "bin", name)
 	if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 		return candidate, nil
 	}
-	path, err := exec.LookPath("go")
-	if err != nil {
-		return "", fmt.Errorf("find go tool: %w", err)
-	}
-	return path, nil
+	return "", fmt.Errorf("find go tool: %w", pathErr)
 }
 
 func gatewayBinaryName(goos string) string {

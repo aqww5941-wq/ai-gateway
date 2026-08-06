@@ -103,11 +103,11 @@ type Breaker struct {
 	name string
 	cfg  Config
 
-	state         atomic.Int32 // State
-	failures      atomic.Uint32
-	openSinceUnix atomic.Int64 // unix nanos when we transitioned to Open
+	state          atomic.Int32 // State
+	failures       atomic.Uint32
+	openSinceUnix  atomic.Int64 // unix nanos when we transitioned to Open
 	probesInFlight atomic.Uint32
-	probesOK      atomic.Uint32
+	probesOK       atomic.Uint32
 
 	// trMu serializes state transitions only. Hot-path Allow/onSuccess/onFailure
 	// stay lock-free; transitions are rare so the contention is negligible.

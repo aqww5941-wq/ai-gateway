@@ -26,9 +26,9 @@ func IdentityFromCtx(ctx context.Context) *store.KeyIdentity {
 
 // Auth caches key identities from the store with periodic refresh.
 type Auth struct {
-	store    *store.Store
-	cache    map[string]*store.KeyIdentity // token -> identity
-	cacheMu  sync.RWMutex
+	store   *store.Store
+	cache   map[string]*store.KeyIdentity // token -> identity
+	cacheMu sync.RWMutex
 }
 
 // NewAuth creates an auth middleware backed by the key store.

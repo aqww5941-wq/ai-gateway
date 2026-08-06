@@ -28,9 +28,9 @@ import (
 // The zero value is usable but exposes no metrics; use NewCoalescer for full
 // hit/share counters.
 type Coalescer struct {
-	g       singleflight.Group
-	calls   atomic.Uint64 // total Do invocations
-	shared  atomic.Uint64 // requests that piggybacked on another in-flight call
+	g      singleflight.Group
+	calls  atomic.Uint64 // total Do invocations
+	shared atomic.Uint64 // requests that piggybacked on another in-flight call
 }
 
 func NewCoalescer() *Coalescer { return &Coalescer{} }

@@ -6,15 +6,15 @@ import (
 )
 
 type QuotaSnapshot struct {
-	KeyID           int64  `json:"key_id"`
-	KeyName         string `json:"name"`
-	DailyLimit      int64  `json:"daily_limit"`
-	MonthlyLimit    int64  `json:"monthly_limit"`
-	UsedToday       int64  `json:"used_tokens"`
-	RemainingToday  int64  `json:"remaining_tokens"`
-	UsedThisMonth   int64  `json:"used_monthly"`
-	RemainingMonth  int64  `json:"remaining_monthly"`
-	ResetAt         int64  `json:"reset_at"`
+	KeyID          int64  `json:"key_id"`
+	KeyName        string `json:"name"`
+	DailyLimit     int64  `json:"daily_limit"`
+	MonthlyLimit   int64  `json:"monthly_limit"`
+	UsedToday      int64  `json:"used_tokens"`
+	RemainingToday int64  `json:"remaining_tokens"`
+	UsedThisMonth  int64  `json:"used_monthly"`
+	RemainingMonth int64  `json:"remaining_monthly"`
+	ResetAt        int64  `json:"reset_at"`
 }
 
 func dailyPeriod() string {

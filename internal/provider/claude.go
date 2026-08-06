@@ -47,7 +47,7 @@ func NewClaude(cfg config.ProviderConfig, logger *slog.Logger) (*ClaudeProvider,
 	}, nil
 }
 
-func (p *ClaudeProvider) Name() string             { return p.name }
+func (p *ClaudeProvider) Name() string              { return p.name }
 func (p *ClaudeProvider) SupportedModels() []string { return p.models }
 
 func (p *ClaudeProvider) SetTransport(rt *http.Transport) {
@@ -83,11 +83,11 @@ type anthropicUsage struct {
 }
 
 type anthropicResponse struct {
-	ID      string                  `json:"id"`
-	Model   string                  `json:"model"`
-	Content []anthropicContentBlock `json:"content"`
-	Usage   anthropicUsage          `json:"usage"`
-	StopReason string               `json:"stop_reason"`
+	ID         string                  `json:"id"`
+	Model      string                  `json:"model"`
+	Content    []anthropicContentBlock `json:"content"`
+	Usage      anthropicUsage          `json:"usage"`
+	StopReason string                  `json:"stop_reason"`
 }
 
 func (p *ClaudeProvider) ChatCompletionStream(ctx context.Context, req *ChatRequest) (<-chan *StreamChunk, error) {

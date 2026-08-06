@@ -143,11 +143,11 @@ func (t *LatencyTracker) Samples() int {
 // skipped. If ALL providers are above the threshold (everything is on fire),
 // we fall through to picking the least-bad one rather than failing routing.
 type LatencyStrategy struct {
-	mu             sync.RWMutex
-	trackers       map[string]*LatencyTracker // key = "provider/model"
-	windowSize     int
-	warmupSamples  int
-	failFraction   float64
+	mu            sync.RWMutex
+	trackers      map[string]*LatencyTracker // key = "provider/model"
+	windowSize    int
+	warmupSamples int
+	failFraction  float64
 }
 
 // NewLatencyStrategy builds the strategy. Sensible defaults are applied for

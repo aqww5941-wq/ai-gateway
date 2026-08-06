@@ -1,0 +1,95 @@
+name: Quality
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Go quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check formatting
+        run: go run ./cmd/quality
+
+      - name: Run tests
+        run: go test -count=1 ./...
+
+      - name: Run race detector
+        run: go test -race -count=1 ./...
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run Staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
+
+      - name: Validate workflow syntax
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+
+      - name: Build gateway
+        run: CGO_ENABLED=0 go build -trimpath -buildvcs=false -o "${RUNNER_TEMP}/ai-gateway" ./cmd/gateway
+
+  frontend:
+    name: Frontend quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: web/.node-version
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install locked dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Run frontend quality checks
+        working-directory: web
+        run: npm run quality
+
+      - name: Verify generated assets are current
+        shell: bash
+        run: |
+          git diff --exit-code -- internal/static/dist
+          if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
+            git status --short
+            exit 1
+          fi
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Scan repository
+        run: go run github.com/zricethezav/gitleaks/v8@v8.27.2 dir . --no-banner --redact
