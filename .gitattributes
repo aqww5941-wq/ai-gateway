@@ -1,0 +1,10 @@
+# Vite inputs must use identical bytes on Windows and Unix.
+web/**/*.css text eol=lf
+web/**/*.html text eol=lf
+web/**/*.js text eol=lf
+web/**/*.json text eol=lf
+web/**/*.ts text eol=lf
+web/**/*.tsx text eol=lf
+
+# Generated embedded assets are compared and committed byte-for-byte.
+internal/static/dist/** -text

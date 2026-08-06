@@ -32,12 +32,14 @@
 git clone https://github.com/your-org/ai-gateway.git
 cd ai-gateway
 
-# 构建前端（仅首次或前端有改动时需要）
-cd web && npm install && npm run build && cd ..
-
-# 编译 Go 二进制
-go build -o bin/gateway ./cmd/gateway
+# 跨平台完整构建：npm ci、前端产物生成、Go 二进制编译
+go run ./cmd/build
 ```
+
+Windows 输出 `bin/gateway.exe`，Linux/macOS 输出 `bin/gateway`。也可以运行
+`make build`，它会委托给同一个 Go 构建入口。仅构建前端或后端时，分别使用
+`go run ./cmd/build -target frontend` 和 `go run ./cmd/build -target backend`。
+前端只生成到 `internal/static/dist/`，该目录也是 Go 的唯一嵌入输入。
 
 ### 2. 配置环境变量
 
@@ -50,8 +52,13 @@ export DOUBAO_API_KEY=...
 ### 3. 启动
 
 ```bash
+# Linux / macOS
 ./bin/gateway                          # 默认读取 config/gateway.yaml
 ./bin/gateway -config /path/to.yaml    # 指定配置文件
+
+# Windows PowerShell
+.\bin\gateway.exe
+.\bin\gateway.exe -config C:\path\to\gateway.yaml
 ```
 
 网关监听 `:8081`，管理后台 `http://localhost:8081/admin/dashboard/`。
@@ -222,7 +229,9 @@ GET    /metrics                     # Prometheus 指标
 
 ```
 ai-gateway/
-├── cmd/gateway/main.go             # 入口
+├── cmd/
+│   ├── build/main.go               # 跨平台统一构建入口
+│   └── gateway/main.go             # 网关入口
 ├── config/
 │   ├── config.go                   # YAML 加载
 │   ├── reloader.go                 # fsnotify 热重载
@@ -239,10 +248,11 @@ ai-gateway/
 │   ├── retry/                      # 指数退避重试（全抖动，429 感知）
 │   ├── router/                     # round_robin / semantic / latency / fallback
 │   ├── server/                     # HTTP Server + Admin API + 请求处理
-│   ├── static/                     //go:embed 内嵌前端 SPA
+│   ├── static/
+│   │   └── dist/                   # 唯一前端构建产物与 //go:embed 输入
 │   ├── store/                      # SQLite — 鉴权 / 配额 / 审计
 │   └── tracing/                    # OpenTelemetry 封装
-├── web/                            # React 管理后台前端
+├── web/                            # React 管理后台前端（web/dist 已停用并忽略）
 │   ├── src/
 │   │   ├── pages/                  # 8 个页面组件
 │   │   ├── components/            # 通用 UI 组件
@@ -276,8 +286,8 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-COPY --from=web /app/web/dist ./web/dist
-RUN CGO_ENABLED=0 go build -o gateway ./cmd/gateway
+COPY --from=web /app/internal/static/dist ./internal/static/dist
+RUN CGO_ENABLED=0 go build -trimpath -buildvcs=false -o gateway ./cmd/gateway
 
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates

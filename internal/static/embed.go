@@ -8,6 +8,9 @@ import (
 	"strings"
 )
 
+// dist is generated directly by `go run ./cmd/build -target frontend`.
+// It is the only frontend build output tracked and embedded by the repository.
+//
 //go:embed dist/*
 var dist embed.FS
 
@@ -17,7 +20,7 @@ var dist embed.FS
 func SPAHandler() http.Handler {
 	sub, err := fs.Sub(dist, "dist")
 	if err != nil {
-		panic("static: embedded dist directory not found — run `make build` first: " + err.Error())
+		panic("static: embedded dist directory not found — run `go run ./cmd/build` first: " + err.Error())
 	}
 	fileServer := http.FileServer(http.FS(sub))
 

@@ -1,14 +1,13 @@
 .PHONY: build build-frontend build-backend dev clean
 
-build: build-frontend build-backend
+build:
+	go run ./cmd/build
 
 build-frontend:
-	cd web && npm ci && npm run build
-	rm -rf internal/static/dist
-	cp -r web/dist internal/static/dist
+	go run ./cmd/build -target frontend
 
 build-backend:
-	go build -o bin/gateway ./cmd/gateway
+	go run ./cmd/build -target backend
 
 dev:
 	@echo "Start the Go server: go run ./cmd/gateway --config config/gateway.yaml"
@@ -16,4 +15,4 @@ dev:
 	@echo "Visit http://localhost:5173/admin/dashboard/"
 
 clean:
-	rm -rf web/dist internal/static/dist bin/
+	go run ./cmd/build -target clean

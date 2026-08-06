@@ -6,7 +6,10 @@ export default defineConfig({
   plugins: [react()],
   base: '/admin/dashboard/',
   build: {
-    outDir: 'dist',
+    // The Go binary embeds this directory directly. Keep one generated copy;
+    // web/dist is intentionally retired and ignored.
+    outDir: '../internal/static/dist',
+    emptyOutDir: true,
   },
   resolve: {
     alias: {
@@ -16,8 +19,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/admin/api': 'http://localhost:8080',
-      '/metrics': 'http://localhost:8080',
+      '/admin/api': 'http://localhost:8081',
+      '/metrics': 'http://localhost:8081',
     },
   },
 })
