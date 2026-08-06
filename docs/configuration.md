@@ -16,8 +16,31 @@ DeepSeek、Qwen 建立彼此独立的 Native Provider 声明；三家 Adapter �
 
 `credential.env` 保存的是 Secret 环境变量名称（例如 `DASHSCOPE_API_KEY`），不是
 `${DASHSCOPE_API_KEY}`，所以加载 Native Bootstrap 声明时不会把秘密值复制进 `Config`。
-启动和配置 Reload 都调用同一个 `config.Load`。Reload 的原子发布与动态/静态字段分类不在
-本契约中，由 Task 5 处理。
+启动和配置 Reload 都调用同一个 `config.Load`；Reload 还会执行下述运行时发布契约。
+
+## M0 Reload 发布契约
+
+当前阶段只有 `providers` 和 `routes` 是 Dynamic。候选配置需要先完整通过解析、校验、
+restart-required 对比、Provider/Router 构建，随后生成单调递增 revision，并通过一次原子指针
+交换发布。每个请求在入口捕获一个 revision，路由、Fallback、Provider、Breaker、Latency、
+Cache namespace 和 Singleflight key 在整个请求生命周期内只使用该版本。
+
+以下区块在 M0 是 `restart-required`：
+
+| 区块 | 拒绝热更新的原因 |
+| --- | --- |
+| `server` | 监听地址、HTTP timeout、Transport、并发队列和 SQLite 路径在启动时构造 |
+| `auth` / `quota` | HTTP Middleware 和种子 Key/Store 在启动时构造 |
+| `rate_limit` | Limiter 及 Middleware 在启动时构造 |
+| `cache` | Cache Backend、TTL、容量和策略在启动时构造 |
+| `filter` | Filter 实例在启动时构造 |
+| `tracing` | Exporter 与采样器属于进程生命周期资源 |
+
+任一 restart-required 区块发生变化时，整个候选配置被拒绝，旧 revision 保持可用。构建
+Provider/Router 或 Reload callback 失败时同样不更新 `Reloader.Config()`。当前 Provider 没有
+Close 生命周期；旧 Snapshot 资源回收和引用计数由 Task 16 处理。结构化日志记录
+`from_revision`、`candidate_revision`/`config_revision`、`stage`、`changed_sections`；
+`gateway_config_reload_total{result,stage}` 统计发布与各阶段拒绝，不使用高基数 revision Label。
 
 ## 最小可运行的安全示例
 

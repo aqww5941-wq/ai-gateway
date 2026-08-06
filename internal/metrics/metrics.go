@@ -132,6 +132,15 @@ var (
 			Help:      "Requests that shared a singleflight upstream call.",
 		},
 	)
+
+	ConfigReloadTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "gateway",
+			Name:      "config_reload_total",
+			Help:      "Runtime configuration reload attempts by result and stage.",
+		},
+		[]string{"result", "stage"}, // result: published | rejected | unchanged; stage: validation | restart_required | snapshot_build | compare | publish
+	)
 )
 
 // Register installs all gateway collectors on the supplied registry. Returns
@@ -151,6 +160,7 @@ func Register() http.Handler {
 		BreakerShortCircuitTotal,
 		RetryAttemptsTotal,
 		CoalescedRequestsTotal,
+		ConfigReloadTotal,
 	)
 	return promhttp.HandlerFor(registry, promhttp.HandlerOpts{})
 }

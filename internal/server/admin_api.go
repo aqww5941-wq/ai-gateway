@@ -14,6 +14,7 @@ import (
 
 // GET /admin/api/v1/overview
 func (s *Server) handleAdminOverview(w http.ResponseWriter, r *http.Request) {
+	snapshot := s.currentSnapshot()
 	totalCalls, sharedCalls := s.coalescer.Stats()
 	dedupRatio := 0.0
 	if totalCalls > 0 {
@@ -35,39 +36,41 @@ func (s *Server) handleAdminOverview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, map[string]interface{}{
-		"uptime_seconds":     int(time.Since(startTime).Seconds()),
-		"total_requests":     totalReqs,
-		"cache_hits":         hits,
-		"cache_misses":       misses,
-		"hit_rate_pct":       hitRate,
-		"total_errors":       totalErrs,
-		"error_rate_pct":     errRate,
-		"stream_requests":    stats.StreamReqs.Load(),
+		"uptime_seconds":  int(time.Since(startTime).Seconds()),
+		"total_requests":  totalReqs,
+		"cache_hits":      hits,
+		"cache_misses":    misses,
+		"hit_rate_pct":    hitRate,
+		"total_errors":    totalErrs,
+		"error_rate_pct":  errRate,
+		"stream_requests": stats.StreamReqs.Load(),
 		"coalescer": map[string]interface{}{
-			"total_calls":    totalCalls,
-			"shared_calls":   sharedCalls,
+			"total_calls":     totalCalls,
+			"shared_calls":    sharedCalls,
 			"dedup_ratio_pct": dedupRatio,
 		},
-		"cache_enabled":       s.config.Cache.Enabled,
-		"cache_backend":       s.config.Cache.Backend,
-		"cache_strategy":      s.config.Cache.Strategy,
-		"rate_limit_enabled": s.config.RateLimit.Enabled,
+		"cache_enabled":      snapshot.config.Cache.Enabled,
+		"cache_backend":      snapshot.config.Cache.Backend,
+		"cache_strategy":     snapshot.config.Cache.Strategy,
+		"rate_limit_enabled": snapshot.config.RateLimit.Enabled,
+		"config_revision":    snapshot.revision,
 	})
 }
 
 // GET /admin/api/v1/breakers
 func (s *Server) handleAdminBreakers(w http.ResponseWriter, r *http.Request) {
+	snapshot := s.currentSnapshot()
 	writeJSON(w, map[string]interface{}{
-		"breakers": s.breakers.Snapshots(),
+		"breakers":        snapshot.breakers.Snapshots(),
+		"config_revision": snapshot.revision,
 	})
 }
 
 // GET /admin/api/v1/providers
 func (s *Server) handleAdminProviders(w http.ResponseWriter, r *http.Request) {
-	s.mu.RLock()
-	cfg := s.config
-	providers := s.providers
-	s.mu.RUnlock()
+	snapshot := s.currentSnapshot()
+	cfg := snapshot.config
+	providers := snapshot.providers
 
 	type providerInfo struct {
 		Name         string   `json:"name"`
@@ -84,7 +87,7 @@ func (s *Server) handleAdminProviders(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			continue
 		}
-		br := s.breakers.Get(pc.Name)
+		br := snapshot.breakers.Get(pc.Name)
 		state := br.State().String()
 		health := "healthy"
 		switch state {
@@ -107,29 +110,28 @@ func (s *Server) handleAdminProviders(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, map[string]interface{}{
-		"providers": out,
+		"providers":       out,
+		"config_revision": snapshot.revision,
 	})
 }
 
 // GET /admin/api/v1/latency
 func (s *Server) handleAdminLatency(w http.ResponseWriter, r *http.Request) {
-	s.mu.RLock()
-	cfg := s.config
-	s.mu.RUnlock()
-	snapshots := s.router.LatencySnapshots(cfg.Routes)
+	snapshot := s.currentSnapshot()
+	snapshots := snapshot.router.LatencySnapshots(snapshot.config.Routes)
 	if snapshots == nil {
 		snapshots = []router.RouteLatencySnapshot{}
 	}
 	writeJSON(w, map[string]interface{}{
-		"routes": snapshots,
+		"routes":          snapshots,
+		"config_revision": snapshot.revision,
 	})
 }
 
 // GET /admin/api/v1/routes
 func (s *Server) handleAdminRoutesV1(w http.ResponseWriter, r *http.Request) {
-	s.mu.RLock()
-	cfg := s.config
-	s.mu.RUnlock()
+	snapshot := s.currentSnapshot()
+	cfg := snapshot.config
 
 	type targetInfo struct {
 		Provider string `json:"provider"`
@@ -142,11 +144,11 @@ func (s *Server) handleAdminRoutesV1(w http.ResponseWriter, r *http.Request) {
 		Model      string `json:"model"`
 	}
 	type routeInfo struct {
-		Name          string          `json:"name"`
-		MatchModel    string          `json:"match_model"`
-		Strategy      string          `json:"strategy"`
-		Targets       []targetInfo    `json:"targets"`
-		SemanticRules []semanticRule  `json:"semantic_rules"`
+		Name          string         `json:"name"`
+		MatchModel    string         `json:"match_model"`
+		Strategy      string         `json:"strategy"`
+		Targets       []targetInfo   `json:"targets"`
+		SemanticRules []semanticRule `json:"semantic_rules"`
 	}
 
 	routes := make([]routeInfo, 0, len(cfg.Routes))
@@ -177,12 +179,14 @@ func (s *Server) handleAdminRoutesV1(w http.ResponseWriter, r *http.Request) {
 		routes = append(routes, ri)
 	}
 	writeJSON(w, map[string]interface{}{
-		"routes": routes,
+		"routes":          routes,
+		"config_revision": snapshot.revision,
 	})
 }
 
 // GET /admin/api/v1/cache
 func (s *Server) handleAdminCacheV1(w http.ResponseWriter, r *http.Request) {
+	snapshot := s.currentSnapshot()
 	hits := stats.CacheHits.Load()
 	misses := stats.CacheMisses.Load()
 	totalCache := hits + misses
@@ -199,15 +203,16 @@ func (s *Server) handleAdminCacheV1(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, map[string]interface{}{
-		"enabled":       s.config.Cache.Enabled,
-		"backend":       s.config.Cache.Backend,
-		"strategy":      s.config.Cache.Strategy,
-		"max_size":      s.config.Cache.MaxSize,
-		"current_size":  cacheSize,
-		"hits":          hits,
-		"misses":        misses,
-		"hit_rate_pct":  hitRate,
-		"entries":       entries,
+		"enabled":         snapshot.config.Cache.Enabled,
+		"backend":         snapshot.config.Cache.Backend,
+		"strategy":        snapshot.config.Cache.Strategy,
+		"max_size":        snapshot.config.Cache.MaxSize,
+		"current_size":    cacheSize,
+		"hits":            hits,
+		"misses":          misses,
+		"hit_rate_pct":    hitRate,
+		"entries":         entries,
+		"config_revision": snapshot.revision,
 	})
 }
 
@@ -391,7 +396,8 @@ func (s *Server) handleAdminAuditLogs(w http.ResponseWriter, r *http.Request) {
 // GET /admin/api/v1/filter
 func (s *Server) handleAdminFilter(w http.ResponseWriter, r *http.Request) {
 	allRules := filter.AvailableRules()
-	cfg := s.config.Filter
+	snapshot := s.currentSnapshot()
+	cfg := snapshot.config.Filter
 
 	enabledSet := make(map[string]bool, len(cfg.Rules))
 	for _, name := range cfg.Rules {
@@ -415,9 +421,10 @@ func (s *Server) handleAdminFilter(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, map[string]interface{}{
-		"enabled": cfg.Enabled,
-		"mode":    cfg.Mode,
-		"rules":   rules,
+		"enabled":         cfg.Enabled,
+		"mode":            cfg.Mode,
+		"rules":           rules,
+		"config_revision": snapshot.revision,
 	})
 }
 

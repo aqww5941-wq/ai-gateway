@@ -31,7 +31,7 @@ func TestBreakerOpensAfterUpstreamFailures(t *testing.T) {
 
 	srv := newTestSrvSingleProvider(t, mock.URL)
 	// Tighten the breaker so the test is fast and deterministic.
-	srv.breakers = breaker.NewManager(breaker.Config{
+	srv.currentSnapshot().breakers = breaker.NewManager(breaker.Config{
 		FailureThreshold: 3,
 		CoolDown:         50 * time.Millisecond,
 		HalfOpenSuccess:  1,
@@ -90,7 +90,7 @@ func TestBreakerRecoversAfterCooldown(t *testing.T) {
 	defer mock.Close()
 
 	srv := newTestSrvSingleProvider(t, mock.URL)
-	srv.breakers = breaker.NewManager(breaker.Config{
+	srv.currentSnapshot().breakers = breaker.NewManager(breaker.Config{
 		FailureThreshold: 2,
 		CoolDown:         100 * time.Millisecond,
 		HalfOpenSuccess:  1,
@@ -103,7 +103,7 @@ func TestBreakerRecoversAfterCooldown(t *testing.T) {
 		srv.handleChatCompletion(httptest.NewRecorder(), req)
 	}
 	// Breaker should be open now.
-	if br := srv.breakers.Get("mock"); br.State() != breaker.StateOpen {
+	if br := srv.currentSnapshot().breakers.Get("mock"); br.State() != breaker.StateOpen {
 		t.Fatalf("breaker state = %s, want open", br.State())
 	}
 	healthy.Store(true)
@@ -116,7 +116,7 @@ func TestBreakerRecoversAfterCooldown(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("probe expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	if br := srv.breakers.Get("mock"); br.State() != breaker.StateClosed {
+	if br := srv.currentSnapshot().breakers.Get("mock"); br.State() != breaker.StateClosed {
 		t.Fatalf("breaker state = %s, want closed (after successful probe)", br.State())
 	}
 }
@@ -158,7 +158,7 @@ func TestRetriesThenSucceeds(t *testing.T) {
 	if got := n.Load(); got != 3 {
 		t.Fatalf("upstream attempts = %d, want 3", got)
 	}
-	if br := srv.breakers.Get("mock"); br.State() != breaker.StateClosed {
+	if br := srv.currentSnapshot().breakers.Get("mock"); br.State() != breaker.StateClosed {
 		t.Fatalf("breaker state after retried success = %s, want closed", br.State())
 	}
 }
@@ -230,7 +230,7 @@ func TestNonRetryableErrorNotRetried(t *testing.T) {
 	if got := calls.Load(); got != 1 {
 		t.Fatalf("upstream called %d times for a 400, want 1 (no retry)", got)
 	}
-	if br := srv.breakers.Get("mock"); br.State() != breaker.StateClosed {
+	if br := srv.currentSnapshot().breakers.Get("mock"); br.State() != breaker.StateClosed {
 		t.Fatalf("breaker state = %s, want closed (400 is client-fault, not upstream-fault)", br.State())
 	}
 }

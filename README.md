@@ -21,7 +21,7 @@ LLM 接入需要统一处理凭据、协议差异、路由、韧性、限流配�
 | **审计日志** | 每次请求记录调用方、模型、token 消耗、延迟，30 天自动清理 |
 | **管理后台** | React SPA 内嵌二进制，单文件部署，Key 管理 / 配额 / 熔断器 / 缓存 / 审计一站式 |
 | **可观测** | Prometheus 指标 + OpenTelemetry 链路追踪 + 结构化 slog 日志 + 请求成本估算 |
-| **热重载** | fsnotify 监听配置文件，改完即生效，不停机 |
+| **受控热重载** | Provider/Route 以单调 revision 原子发布；Server/Auth/Quota/Cache/Filter 等启动资源变更明确要求重启 |
 | **零框架** | 仅依赖 yaml、sqlite、redis、OTel SDK，无 Web 框架 |
 
 ## 快速开始

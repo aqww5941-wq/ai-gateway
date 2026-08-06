@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os/signal"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -31,10 +30,7 @@ import (
 )
 
 type Server struct {
-	config        *config.Config
-	router        *router.Router
-	providers     map[string]provider.LLMProvider
-	mu            sync.RWMutex
+	runtime       runtimeState
 	logger        *slog.Logger
 	httpSrv       *http.Server
 	cacheBackend  cache.CacheBackend
@@ -53,7 +49,6 @@ type Server struct {
 	// Resilience layer — one breaker per provider, one coalescer for the
 	// whole gateway, one shared retry policy. All three are nil-safe to
 	// disable, but they're always on in production.
-	breakers    *breaker.Manager
 	coalescer   *cache.Coalescer
 	retryPolicy retry.Policy
 }
@@ -63,15 +58,11 @@ func New(cfg *config.Config, r *router.Router, provs map[string]provider.LLMProv
 		return nil, fmt.Errorf("no runnable providers configured: native bootstrap providers must remain disabled until their adapters are implemented")
 	}
 	s := &Server{
-		config:    cfg,
-		router:    r,
-		providers: provs,
-		logger:    logger,
+		logger: logger,
 		// Defaults are tuned for an LLM gateway: 5 consecutive failures
 		// before tripping (gives ~10 s of badness budget at typical QPS),
 		// 10 s cool-down (long enough for transient upstream noise to clear),
 		// 2 consecutive probe successes to close (avoids flaps).
-		breakers:  breaker.NewManager(breaker.Config{}),
 		coalescer: cache.NewCoalescer(),
 		retryPolicy: retry.Policy{
 			MaxAttempts: 3,
@@ -79,6 +70,7 @@ func New(cfg *config.Config, r *router.Router, provs map[string]provider.LLMProv
 			MaxDelay:    2 * time.Second,
 		},
 	}
+	s.runtime.current.Store(newInitialRuntimeSnapshot(cfg, r, provs))
 
 	// Build shared HTTP transport with upstream connection pool limits.
 	tc := cfg.Server.Transport
@@ -228,7 +220,8 @@ func New(cfg *config.Config, r *router.Router, provs map[string]provider.LLMProv
 }
 
 func (s *Server) Start() error {
-	s.logger.Info("gateway starting", "port", s.config.Server.Port)
+	snapshot := s.currentSnapshot()
+	s.logger.Info("gateway starting", "port", snapshot.config.Server.Port, "config_revision", snapshot.revision)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -247,81 +240,15 @@ func (s *Server) Start() error {
 	return s.httpSrv.Shutdown(shutdownCtx)
 }
 
-// Reload hot-swaps the router and providers from a new config without downtime.
-func (s *Server) Reload(cfg *config.Config) error {
-	// Build new providers
-	newProvs := make(map[string]provider.LLMProvider, len(cfg.Providers))
-	for _, pCfg := range cfg.Providers {
-		if !pCfg.RuntimeEnabled() {
-			continue
-		}
-		pLogger := s.logger.With("provider", pCfg.Name)
-		switch pCfg.Type {
-		case "openai":
-			p, err := provider.NewOpenAI(pCfg, pLogger)
-			if err != nil {
-				return fmt.Errorf("provider %q: %w", pCfg.Name, err)
-			}
-			newProvs[pCfg.Name] = p
-		case "claude":
-			p, err := provider.NewClaude(pCfg, pLogger)
-			if err != nil {
-				return fmt.Errorf("provider %q: %w", pCfg.Name, err)
-			}
-			newProvs[pCfg.Name] = p
-		default:
-			return fmt.Errorf("unknown provider type %q for %q", pCfg.Type, pCfg.Name)
-		}
-	}
-	if len(newProvs) == 0 {
-		return fmt.Errorf("no runnable providers configured: native bootstrap providers must remain disabled until their adapters are implemented")
-	}
-
-	// Apply shared transport to new providers.
-	for _, p := range newProvs {
-		if ts, ok := p.(provider.TransportSetter); ok {
-			ts.SetTransport(s.transport)
-		}
-	}
-
-	// Build new router
-	newRouter, err := router.NewRouter(cfg.Routes)
-	if err != nil {
-		return fmt.Errorf("router: %w", err)
-	}
-
-	// Validate targets reference known providers
-	for _, routeCfg := range cfg.Routes {
-		for _, t := range routeCfg.Targets {
-			if _, ok := newProvs[t.Provider]; !ok {
-				return fmt.Errorf("route %q references unknown provider %q", routeCfg.Name, t.Provider)
-			}
-		}
-		for _, sr := range routeCfg.SemanticRules {
-			if _, ok := newProvs[sr.Target.Provider]; !ok {
-				return fmt.Errorf("route %q references unknown provider %q", routeCfg.Name, sr.Target.Provider)
-			}
-		}
-	}
-
-	// Atomic swap
-	s.mu.Lock()
-	s.config = cfg
-	s.router = newRouter
-	s.providers = newProvs
-	s.mu.Unlock()
-
-	s.logger.Info("config hot-reloaded successfully")
-	return nil
-}
-
 func (s *Server) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
+	snapshot := s.currentSnapshot()
 
 	// gateway.handle is the root span for the request. We propagate
 	// W3C traceparent from the incoming request so this span links to the
 	// caller's trace (e.g. an upstream service that already started one).
 	ctx, span := tracing.StartSpan(r.Context(), "gateway.handle")
+	span.SetAttributes(otelAttrInt("config.revision", int(snapshot.revision)))
 	defer span.End()
 	r = r.WithContext(ctx)
 
@@ -361,13 +288,13 @@ func (s *Server) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 
 	if req.Stream {
 		recordStream()
-		s.handleStreamCompletion(w, r, &req)
+		s.handleStreamCompletion(w, r, &req, snapshot)
 		return
 	}
 
 	// Check cache
 	if s.cacheBackend != nil {
-		key := cache.CacheKey(&req)
+		key := snapshot.cacheKey(&req)
 		if resp, hit := s.cacheBackend.Get(key); hit {
 			recordHit()
 			s.logger.Info("cache hit", "model", req.Model)
@@ -394,7 +321,7 @@ func (s *Server) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	}
 
 	routeCtx, routeSpan := tracing.StartSpan(r.Context(), "route.select")
-	target, err := s.router.Route(routeCtx, &req)
+	target, err := snapshot.router.Route(routeCtx, &req)
 	if target != nil {
 		routeSpan.SetAttributes(otelAttrString("route.provider", target.Provider), otelAttrString("route.model", target.Model))
 	}
@@ -410,19 +337,19 @@ func (s *Server) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	// route's latency strategy (req.Model gets mutated to the upstream model
 	// before the provider call).
 	originalModel := req.Model
-	fallbackChain := s.router.FallbackChain(req.Model)
+	fallbackChain := snapshot.router.FallbackChain(req.Model)
 	obs := observer.New(target.Model, target.Provider)
 
 	// Singleflight on the cache key — concurrent identical cache-miss requests
 	// share a single upstream call instead of fanning out.
-	sfKey := cache.CacheKey(&req)
+	sfKey := snapshot.cacheKey(&req)
 	resp, shared, err := s.coalescer.Do(r.Context(), sfKey, func(ctx context.Context) (*provider.ChatResponse, error) {
 		if fallbackChain != nil {
-			return s.tryWithFallback(ctx, &req, originalModel, fallbackChain, obs)
+			return s.tryWithFallback(ctx, snapshot, &req, originalModel, fallbackChain, obs)
 		}
 		req.Model = target.Model
-		s.logger.Info("routing", "model", target.Model, "provider", target.Provider)
-		return s.callProviderUnary(ctx, target.Provider, target.Model, originalModel, &req)
+		s.logger.Info("routing", "model", target.Model, "provider", target.Provider, "config_revision", snapshot.revision)
+		return s.callProviderUnary(ctx, snapshot, target.Provider, target.Model, originalModel, &req)
 	})
 	if shared {
 		metrics.CoalescedRequestsTotal.Inc()
@@ -481,19 +408,19 @@ func (s *Server) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) tryWithFallback(ctx context.Context, req *provider.ChatRequest, originalModel string, chain []router.Target, obs *observer.Observer) (*provider.ChatResponse, error) {
+func (s *Server) tryWithFallback(ctx context.Context, snapshot *runtimeSnapshot, req *provider.ChatRequest, originalModel string, chain []router.Target, obs *observer.Observer) (*provider.ChatResponse, error) {
 	var lastErr error
 	for i, t := range chain {
-		if _, ok := s.providers[t.Provider]; !ok {
+		if _, ok := snapshot.providers[t.Provider]; !ok {
 			lastErr = fmt.Errorf("provider %q not found", t.Provider)
 			continue
 		}
 		req.Model = t.Model
 		obs.Model = t.Model
 		obs.Provider = t.Provider
-		s.logger.Info("fallback attempt", "attempt", i+1, "provider", t.Provider, "model", t.Model)
+		s.logger.Info("fallback attempt", "attempt", i+1, "provider", t.Provider, "model", t.Model, "config_revision", snapshot.revision)
 
-		resp, err := s.callProviderUnary(ctx, t.Provider, t.Model, originalModel, req)
+		resp, err := s.callProviderUnary(ctx, snapshot, t.Provider, t.Model, originalModel, req)
 		if err != nil {
 			lastErr = err
 			s.logger.Warn("fallback target failed", "provider", t.Provider, "error", err)
@@ -522,12 +449,12 @@ func (s *Server) tryWithFallback(ctx context.Context, req *provider.ChatRequest,
 //
 // We also time the call and feed it into the latency strategy (if any) so
 // future routing decisions can favor faster providers.
-func (s *Server) callProviderUnary(ctx context.Context, providerName, modelName, originalModel string, req *provider.ChatRequest) (*provider.ChatResponse, error) {
+func (s *Server) callProviderUnary(ctx context.Context, snapshot *runtimeSnapshot, providerName, modelName, originalModel string, req *provider.ChatRequest) (*provider.ChatResponse, error) {
 	ctx, span := tracing.StartSpan(ctx, "provider.call")
 	span.SetAttributes(otelAttrString("provider.name", providerName), otelAttrString("llm.model", modelName))
 	defer span.End()
 
-	br := s.breakers.Get(providerName)
+	br := snapshot.breakers.Get(providerName)
 	if err := br.Allow(); err != nil {
 		span.SetAttributes(otelAttrBool("breaker.short_circuit", true))
 		metrics.BreakerShortCircuitTotal.WithLabelValues(providerName).Inc()
@@ -535,7 +462,7 @@ func (s *Server) callProviderUnary(ctx context.Context, providerName, modelName,
 		return nil, err
 	}
 
-	prov, ok := s.providers[providerName]
+	prov, ok := snapshot.providers[providerName]
 	if !ok {
 		br.OnFailure()
 		return nil, fmt.Errorf("provider %q not found", providerName)
@@ -561,7 +488,7 @@ func (s *Server) callProviderUnary(ctx context.Context, providerName, modelName,
 		)
 	}
 	s.recordBreakerOutcome(br, providerName, err)
-	s.recordLatencySample(originalModel, providerName, modelName, time.Since(start), err)
+	s.recordLatencySample(snapshot, originalModel, providerName, modelName, time.Since(start), err)
 	return resp, err
 }
 
@@ -571,8 +498,8 @@ func (s *Server) callProviderUnary(ctx context.Context, providerName, modelName,
 // originModel is the model the *client* asked for (used to look up the route);
 // providerName/modelName are what we actually called (the strategy keys on the
 // target tuple, not the client request).
-func (s *Server) recordLatencySample(originModel, providerName, modelName string, d time.Duration, err error) {
-	ls := s.router.LatencyStrategyFor(originModel)
+func (s *Server) recordLatencySample(snapshot *runtimeSnapshot, originModel, providerName, modelName string, d time.Duration, err error) {
+	ls := snapshot.router.LatencyStrategyFor(originModel)
 	if ls == nil {
 		return
 	}
@@ -672,7 +599,7 @@ func (s *Server) auditLog(r *http.Request, model, provider string, promptTokens,
 //     could still be flushing after the handler returned.
 //  4. Fallback parity with non-streaming: if the upstream call itself fails
 //     before any chunk is sent we transparently try the next provider.
-func (s *Server) handleStreamCompletion(w http.ResponseWriter, r *http.Request, req *provider.ChatRequest) {
+func (s *Server) handleStreamCompletion(w http.ResponseWriter, r *http.Request, req *provider.ChatRequest, snapshot *runtimeSnapshot) {
 	streamStart := time.Now()
 
 	ctx, cancel := context.WithCancel(r.Context())
@@ -684,7 +611,7 @@ func (s *Server) handleStreamCompletion(w http.ResponseWriter, r *http.Request, 
 
 	// 1. Cache replay — exact match first, then semantic.
 	// Save original model for cache key — routing will mutate req.Model.
-	origCacheKey := cache.CacheKey(req)
+	origCacheKey := snapshot.cacheKey(req)
 	if s.cacheBackend != nil {
 		if resp, hit := s.cacheBackend.Get(origCacheKey); hit {
 			recordHit()
@@ -709,7 +636,7 @@ func (s *Server) handleStreamCompletion(w http.ResponseWriter, r *http.Request, 
 
 	// 2. Route + open stream (with fallback if configured).
 	routeCtx, routeSpan := tracing.StartSpan(ctx, "route.select")
-	target, err := s.router.Route(routeCtx, req)
+	target, err := snapshot.router.Route(routeCtx, req)
 	if target != nil {
 		routeSpan.SetAttributes(otelAttrString("route.provider", target.Provider), otelAttrString("route.model", target.Model))
 	}
@@ -721,23 +648,23 @@ func (s *Server) handleStreamCompletion(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	fallbackChain := s.router.FallbackChain(req.Model)
+	fallbackChain := snapshot.router.FallbackChain(req.Model)
 	originalModel := req.Model
 	var upstream <-chan *provider.StreamChunk
 	var usedTarget router.Target
 
 	if fallbackChain != nil {
-		upstream, usedTarget, err = s.openStreamWithFallback(ctx, req, originalModel, fallbackChain)
+		upstream, usedTarget, err = s.openStreamWithFallback(ctx, snapshot, req, originalModel, fallbackChain)
 	} else {
 		req.Model = target.Model
 		usedTarget = *target
-		prov, ok := s.providers[target.Provider]
+		prov, ok := snapshot.providers[target.Provider]
 		if !ok {
 			http.Error(w, "upstream provider not found", http.StatusInternalServerError)
 			return
 		}
 		// Breaker-guard the single-target stream open. No retry for streams.
-		br := s.breakers.Get(target.Provider)
+		br := snapshot.breakers.Get(target.Provider)
 		if berr := br.Allow(); berr != nil {
 			metrics.BreakerShortCircuitTotal.WithLabelValues(target.Provider).Inc()
 			s.logger.Warn("stream rejected: breaker open", "provider", target.Provider)
@@ -747,7 +674,7 @@ func (s *Server) handleStreamCompletion(w http.ResponseWriter, r *http.Request, 
 		start := time.Now()
 		upstream, err = prov.ChatCompletionStream(ctx, req)
 		s.recordBreakerOutcome(br, target.Provider, err)
-		s.recordLatencySample(originalModel, target.Provider, target.Model, time.Since(start), err)
+		s.recordLatencySample(snapshot, originalModel, target.Provider, target.Model, time.Since(start), err)
 	}
 
 	if err != nil {
@@ -761,7 +688,7 @@ func (s *Server) handleStreamCompletion(w http.ResponseWriter, r *http.Request, 
 	}
 
 	obs := observer.New(usedTarget.Model, usedTarget.Provider)
-	s.logger.Info("stream routing", "model", usedTarget.Model, "provider", usedTarget.Provider)
+	s.logger.Info("stream routing", "model", usedTarget.Model, "provider", usedTarget.Provider, "config_revision", snapshot.revision)
 
 	// 3. Set SSE headers BEFORE any goroutine spawns, so there's no race
 	//    between WriteHeader and any flusher.Flush.
@@ -902,15 +829,15 @@ func (s *Server) handleStreamCompletion(w http.ResponseWriter, r *http.Request, 
 // helper here: a stream open that fails to even establish the connection is
 // instead retried implicitly via the next entry in the fallback chain, which
 // gives the same effect plus the benefit of trying a different provider.
-func (s *Server) openStreamWithFallback(ctx context.Context, req *provider.ChatRequest, originalModel string, chain []router.Target) (<-chan *provider.StreamChunk, router.Target, error) {
+func (s *Server) openStreamWithFallback(ctx context.Context, snapshot *runtimeSnapshot, req *provider.ChatRequest, originalModel string, chain []router.Target) (<-chan *provider.StreamChunk, router.Target, error) {
 	var lastErr error
 	for i, t := range chain {
-		prov, ok := s.providers[t.Provider]
+		prov, ok := snapshot.providers[t.Provider]
 		if !ok {
 			lastErr = fmt.Errorf("provider %q not found", t.Provider)
 			continue
 		}
-		br := s.breakers.Get(t.Provider)
+		br := snapshot.breakers.Get(t.Provider)
 		if err := br.Allow(); err != nil {
 			metrics.BreakerShortCircuitTotal.WithLabelValues(t.Provider).Inc()
 			s.logger.Warn("stream skipped: breaker open", "provider", t.Provider)
@@ -918,11 +845,11 @@ func (s *Server) openStreamWithFallback(ctx context.Context, req *provider.ChatR
 			continue
 		}
 		req.Model = t.Model
-		s.logger.Info("stream fallback attempt", "attempt", i+1, "provider", t.Provider, "model", t.Model)
+		s.logger.Info("stream fallback attempt", "attempt", i+1, "provider", t.Provider, "model", t.Model, "config_revision", snapshot.revision)
 		start := time.Now()
 		upstream, err := prov.ChatCompletionStream(ctx, req)
 		s.recordBreakerOutcome(br, t.Provider, err)
-		s.recordLatencySample(originalModel, t.Provider, t.Model, time.Since(start), err)
+		s.recordLatencySample(snapshot, originalModel, t.Provider, t.Model, time.Since(start), err)
 		if err != nil {
 			lastErr = err
 			s.logger.Warn("stream fallback target failed", "provider", t.Provider, "error", err)

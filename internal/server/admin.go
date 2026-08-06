@@ -82,7 +82,8 @@ func (ah *AdminHandler) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (ah *AdminHandler) handleRoutes(w http.ResponseWriter, r *http.Request) {
-	cfg := ah.server.config
+	snapshot := ah.server.currentSnapshot()
+	cfg := snapshot.config
 	routes := make([]map[string]interface{}, 0, len(cfg.Routes))
 	for _, rc := range cfg.Routes {
 		route := map[string]interface{}{
@@ -99,11 +100,13 @@ func (ah *AdminHandler) handleRoutes(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"routes": routes,
+		"routes":          routes,
+		"config_revision": snapshot.revision,
 	})
 }
 
 func (ah *AdminHandler) handleCache(w http.ResponseWriter, r *http.Request) {
+	snapshot := ah.server.currentSnapshot()
 	total := stats.CacheHits.Load() + stats.CacheMisses.Load()
 	hitRate := 0.0
 	if total > 0 {
@@ -119,11 +122,11 @@ func (ah *AdminHandler) handleCache(w http.ResponseWriter, r *http.Request) {
 	}
 
 	info := map[string]interface{}{
-		"cache_enabled":   ah.server.config.Cache.Enabled,
-		"cache_backend":   ah.server.config.Cache.Backend,
-		"cache_strategy":  ah.server.config.Cache.Strategy,
+		"cache_enabled":   snapshot.config.Cache.Enabled,
+		"cache_backend":   snapshot.config.Cache.Backend,
+		"cache_strategy":  snapshot.config.Cache.Strategy,
 		"size":            cacheSize,
-		"max_size":        ah.server.config.Cache.MaxSize,
+		"max_size":        snapshot.config.Cache.MaxSize,
 		"hits":            stats.CacheHits.Load(),
 		"misses":          stats.CacheMisses.Load(),
 		"total_requests":  stats.TotalReqs.Load(),
@@ -131,6 +134,7 @@ func (ah *AdminHandler) handleCache(w http.ResponseWriter, r *http.Request) {
 		"stream_requests": stats.StreamReqs.Load(),
 		"hit_rate_pct":    hitRate,
 		"entries":         entries,
+		"config_revision": snapshot.revision,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

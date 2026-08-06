@@ -567,6 +567,19 @@ Requested -> Reserved -> InFlight -> Settled
 
 构建失败保持旧 Snapshot，不允许 Router 已更新而 Cache/Policy 仍是旧版本。日志记录 revision、changed sections、结果和拒绝原因，不记录秘密。
 
+### 11.3 M0 Reload 过渡边界
+
+在完整 Runtime Snapshot v1/v2 建立前，M0 仅允许 `providers` 与 `routes` 热更新；二者作为同一
+不可变 Snapshot 构建和发布，并在 Snapshot 中固定 Router、Provider Registry、Breaker
+状态和路由延迟状态；未变化的 Provider/Breaker 可由相邻 revision 安全共享。请求入口只捕获一次 Snapshot，Cache/Singleflight key 带 revision，避免
+路由变化后复用旧 revision 结果。
+
+`server`、`auth`、`quota`、`rate_limit`、`cache`、`filter`、`tracing` 均属于
+restart-required，因为当前实现中的 HTTP Server、Middleware、Store、Transport、Limiter、
+Cache、Filter 与 Tracer 在启动时构造。修改这些区块必须拒绝整个 Reload，并报告具体区块，
+不能只替换用于管理 API 展示的 Config 指针。Provider/Router 构建或回调失败也不得推进
+Reloader 当前配置。旧资源延迟关闭和引用计数仍由 Task 16 完成。
+
 ## 12. 数据与基础设施
 
 ### 12.1 持久化边界

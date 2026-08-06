@@ -8,17 +8,17 @@ import (
 )
 
 type Reloader struct {
-	path   string
-	mu     sync.RWMutex
-	cfg    *Config
-	logger *slog.Logger
+	path     string
+	mu       sync.RWMutex
+	cfg      *Config
+	logger   *slog.Logger
 	onReload func(*Config) error
 }
 
 func NewReloader(path string, initial *Config, logger *slog.Logger, onReload func(*Config) error) (*Reloader, error) {
 	r := &Reloader{
 		path:     path,
-		cfg:      initial,
+		cfg:      Clone(initial),
 		logger:   logger,
 		onReload: onReload,
 	}
@@ -40,7 +40,7 @@ func NewReloader(path string, initial *Config, logger *slog.Logger, onReload fun
 func (r *Reloader) Config() *Config {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.cfg
+	return Clone(r.cfg)
 }
 
 func (r *Reloader) watch(watcher *fsnotify.Watcher) {
@@ -59,12 +59,8 @@ func (r *Reloader) watch(watcher *fsnotify.Watcher) {
 					r.logger.Error("failed to reload config", "error", err)
 					continue
 				}
-				r.mu.Lock()
-				r.cfg = newCfg
-				r.mu.Unlock()
-
-				if err := r.onReload(newCfg); err != nil {
-					r.logger.Error("reload callback failed", "error", err)
+				if err := r.applyCandidate(newCfg); err != nil {
+					r.logger.Error("config reload rejected", "path", r.path, "error", err)
 				} else {
 					r.logger.Info("config reloaded successfully")
 				}
@@ -76,4 +72,14 @@ func (r *Reloader) watch(watcher *fsnotify.Watcher) {
 			r.logger.Error("config watcher error", "error", err)
 		}
 	}
+}
+
+func (r *Reloader) applyCandidate(candidate *Config) error {
+	if err := r.onReload(candidate); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	r.cfg = Clone(candidate)
+	r.mu.Unlock()
+	return nil
 }
