@@ -72,7 +72,7 @@ v3 设计定义“最终要成为什么”，本任务书定义“从当前代�
 
 | 阶段 | Task | 结果 | 主线状态 |
 | --- | --- | --- | --- |
-| M0 可信基线 | 1～10 | 构建、配置、安全、测试和 CI 可信 | Task 1～5 Done；Task 6 Ready |
+| M0 可信基线 | 1～10 | 构建、配置、安全、测试和 CI 可信 | Task 1～6 Done；Task 7 Ready |
 | M1 Gin 与应用边界 | 11～18 | 双平面 Gin，核心与框架解耦 | Pending |
 | M2 Canonical 与双 Ingress | 19～27 | Chat/Responses 进入同一语义模型 | Pending |
 | M3 国内三厂商 | 28～36 | 方舟、DeepSeek、Qwen 可合约与真实验证 | Pending |
@@ -138,7 +138,7 @@ v3 设计定义“最终要成为什么”，本任务书定义“从当前代�
 
 ### Task 6：为 Store、Migration、Key 和 Quota 建立保护测试
 
-- **状态：** Ready
+- **状态：** Done
 - **依赖：** Task 1
 - **目标：** 固定当前持久化语义，暴露迁移、并发额度和错误处理缺口。
 - **交付：** 临时 SQLite Repository 测试、Migration 幂等测试、Key 生命周期、Quota 并发与 Store 故障测试；已知错误以失败证据进入后续 Ledger Task。
@@ -148,7 +148,7 @@ v3 设计定义“最终要成为什么”，本任务书定义“从当前代�
 
 ### Task 7：为旧 Provider 与 Server 建立端到端回归夹具
 
-- **状态：** Pending
+- **状态：** Ready
 - **依赖：** Task 1
 - **目标：** 在迁移 Gin/Canonical 前锁定当前 Chat、SSE、错误和取消行为。
 - **交付：** `httptest.Server` 上游、Unary/SSE Fixture、Auth/Route/Retry/Fallback/取消测试、脱敏测试数据。
