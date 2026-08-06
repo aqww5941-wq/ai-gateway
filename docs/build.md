@@ -2,6 +2,13 @@
 
 本文定义 AI Gateway 的可复现构建入口、前端生成产物归属和 Git 管理策略。
 
+## 工具链要求
+
+- 完整或前端构建：Go 1.26.4、Node.js 22.14.0、npm 10.9.x。
+- 只构建后端：Go 1.26.4；仓库已跟踪 `internal/static/dist/`，不要求本机安装 Node.js。
+- 版本事实源是 `go.mod`、`web/.node-version`、`web/package.json` 和 lockfile；不要在文档或
+  临时脚本中维护另一套版本。
+
 ## 统一入口
 
 在仓库根目录执行以下命令：
@@ -20,6 +27,11 @@ go run ./cmd/build -target clean
 
 `make build`、`make build-frontend`、`make build-backend` 和 `make clean` 只是这些
 跨平台命令的便捷别名，不再包含 Unix 专用的复制或删除逻辑。
+
+构建完成后，Linux/macOS 使用 `./bin/gateway -config config/gateway.yaml`，Windows
+PowerShell 使用 `.\bin\gateway.exe -config .\config\gateway.yaml`。Unix 也可以执行
+`./start.sh [config-path]`；该包装器只构建后端并以前台 `exec` 方式启动，不会按端口终止
+其他进程。停止前台网关使用 `Ctrl+C`。
 
 ## 产物归属
 
