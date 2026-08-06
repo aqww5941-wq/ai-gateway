@@ -3,107 +3,66 @@
 ## 1. 开始任务
 
 1. 运行 `git status --short` 和 `git branch --show-current`。
-2. 将已有修改视为用户资产；不得覆盖、清理、回滚或顺带提交。
-3. 阅读 `AGENTS.md` 指定的核心规则和所有命中的场景规则。
-4. 阅读相关需求编号、设计、入口代码、调用方和现有测试。
-5. 在动手前确定根因、范围和验证计划。
+2. 把已有修改视为用户资产；不得清理、覆盖、回滚或顺带提交。
+3. 阅读根规则、所有命中的场景规则、相关设计、入口、调用方和测试。
+4. 先写根因、影响范围、方案和验证计划，再编辑。
+5. 若当前实现与设计冲突，先判断是迁移中的已知差异还是设计变更，不自行猜测。
 
 ## 2. 实现要求
 
-- 修 Bug：先添加或明确能证明根因的回归场景，再修复。
-- 新功能：覆盖主路径、失败路径、边界条件以及相关并发时序。
-- 修改运行时决策：同步诊断日志，必要时增加指标和 Trace 属性。
-- 修改 API、配置、Schema 或数据：同步契约、示例、兼容/迁移和回滚说明。
-- 修改前端：验证加载、空数据、错误、权限、窄屏和真实后端契约。
-- 不把格式化或构建产生的无关变化混入任务。
+- Bug：先明确可证明根因的失败场景，再修复。
+- 新功能：覆盖成功、失败、边界、取消和相关并发时序。
+- 运行时决策：同步结构化日志，按影响增加指标与 Trace。
+- API、配置、Schema、数据：同步契约、示例、迁移、兼容和回滚说明。
+- Provider：同步 Capability、Golden、SSE Replay、Error Mapping 和 Conformance。
+- 不把格式化、依赖升级或构建生成的无关变化混入任务。
 
-## 3. 分级验证
+## 3. 验证分级
 
-执行与风险成比例的检查，并在 changelog 中记录实际结果。
-
-### Go 基础检查
+Go 基础检查：
 
 ```text
-gofmt（仅本次修改的 Go 文件）
+gofmt（仅本次 Go 文件）
 go test <受影响包>
 go test ./...
 go vet ./...
 go build ./cmd/gateway
 ```
 
-涉及共享状态、热重载、缓存、路由、限流、配额或 Store 并发时，增加：
+共享状态、Snapshot、Store、Cache、Router、Limiter、Quota 或流并发增加 `go test -race`。Provider 增加 Golden、SSE Replay、Adapter Conformance；Parser 增加 Fuzz Smoke。前端按仓库实际脚本执行依赖安装、lint、test 和 build，不存在的脚本不得写成已运行。
 
-```text
-go test -race <受影响包或 ./...>
-```
+若工具未在 PATH，先查找仓库或系统已安装工具链；使用已确认的绝对路径执行。只有确实不存在或权限受限时才报告环境阻塞，不得用“环境问题”掩盖验证失败。
 
-### 前端基础检查
+验证失败必须分类为本次回归、已知基线问题或真实环境限制，并保留原始命令和关键错误。未通过检查不得描述为通过。
 
-```text
-cd web
-npm ci（依赖环境需要初始化时）
-npm run build
-```
+## 4. 厂商验证分层
 
-项目尚未建立前端 lint/test 脚本时，不得声称已运行；新增脚本后按仓库实际命令执行。
+1. 离线：官方文档样例转为脱敏 Golden、错误 Fixture 和 SSE Replay，CI 必跑。
+2. 合约：同一 Capability Suite 验证 Encode/Decode/Stream/Error/Usage，不允许只测 200 文本。
+3. 真实 API：使用 `ARK_API_KEY`、`DEEPSEEK_API_KEY`、`DASHSCOPE_API_KEY` 的 opt-in Smoke Test；记录地域、Endpoint、模型、协议版本、日期和 Adapter revision。
+4. 没有 Credential 时真实能力状态为 `unverified`，不能用 Mock 将其标记为 verified。Secret 不写入仓库、日志、Fixture 或测试报告。
 
-### 契约与高风险检查
+## 5. Changelog
 
-- Provider/协议：Golden、SSE Replay、Adapter Conformance。
-- API/Schema：兼容性和迁移测试。
-- 安全/账务：威胁检查、并发、故障和幂等测试。
-- 构建/部署：工作树洁净性、镜像、启动和 readiness smoke test。
-
-验证失败时先判断是本次回归、基线问题还是环境限制。未通过的强制检查不得被省略或描述成通过。
-
-## 4. Changelog
-
-代码、配置契约、数据库、API、构建行为或测试行为发生变化时，在 `changelog/` 创建一份 Markdown：
+代码、配置、数据库、API、构建、测试行为或治理规则变化时创建：
 
 ```text
 changelog/YYYYMMDD-HHmm-<lowercase-kebab-slug>.md
 ```
 
-使用 Asia/Shanghai 本地时间。模板见 `changelog/README.md`。记录应解释根因、方案和验证，不要逐行复述 diff。
+使用 Asia/Shanghai 本地时间和 `changelog/README.md` 模板，记录根因、方案、兼容/迁移、风险和实际验证。纯阅读、分析或无文件修改的审查通常不创建。
 
-以下情况通常不创建：纯阅读、分析、代码审查、无文件修改的诊断。只改文档时，如果文档本身是交付物或治理规则，也应创建。
+## 6. 原子 Git 提交
 
-## 5. 自动 Git 提交
+用户未禁止时默认创建本地提交，不 push。提交前：
 
-用户未明确禁止提交时，完成修改后自动创建本地提交，无需再次询问。
+1. 再次检查 status 和本任务 diff。
+2. 使用 `git add -- <显式文件列表>`，禁止 `git add .` 或 `git add -A`。
+3. 检查 `git diff --cached --check` 和完整 staged diff。
+4. 确认未包含用户无关修改、秘密和生成噪音。
 
-提交前必须：
+提交格式为 `<type>(<scope>): <imperative summary>`。默认不 push、force push、rebase、amend 或修改 Git 用户配置。存在验证失败、疑似秘密、重叠修改或无法区分归属时，保留工作树并说明阻塞，不强行提交。
 
-1. 再次运行 `git status --short`。
-2. 检查 `git diff -- <本任务文件>`。
-3. 使用 `git add -- <显式文件列表>`；禁止用 `git add .`、`git add -A` 将用户修改一并纳入。
-4. 检查 `git diff --cached --check` 和 `git diff --cached`。
-5. 确认 changelog 与代码在同一提交中。
+## 7. 最终交付
 
-提交格式：
-
-```text
-<type>(<scope>): <imperative summary>
-```
-
-常用 type：`feat`、`fix`、`refactor`、`test`、`docs`、`build`、`chore`。
-
-默认禁止：
-
-- 自动 push、force push、rebase 或 amend。
-- 修改 Git 用户配置。
-- 暂存与任务无关的文件。
-- 在验证失败、发现疑似秘密或无法区分重叠修改时强行提交。
-
-不能提交时，保留修改并明确说明阻塞原因、未通过检查和未提交文件。
-
-## 6. 交付说明
-
-最终回复必须简洁说明：
-
-- 解决了什么根因。
-- 修改了哪些关键模块。
-- 新增了哪些日志/指标/Trace。
-- 实际通过了哪些验证，哪些未执行或未通过。
-- changelog 文件和 commit SHA。
-- 是否保留了用户原有未提交修改。
+最终回复说明：根因和结果、关键文件、可观测变化、实际验证、未执行项、changelog、commit SHA，以及用户原有修改是否保留。

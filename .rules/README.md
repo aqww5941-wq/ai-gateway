@@ -1,20 +1,20 @@
 # `.rules` 维护说明
 
-`.rules/` 保存 AI Gateway 的可执行工程规范。根目录 `AGENTS.md` 是唯一入口和路由索引，本目录不依赖文件名被 Agent 自动发现。
+`.rules/` 是 AI Gateway 的可执行工程规范；根 `AGENTS.md` 是唯一入口和场景路由表。Agent 不得依赖文件名自动发现规则。
 
 ## 规则分层
 
-- `00-project.md`：所有任务必读，提供项目边界、现状与信息源优先级。
-- `01-engineering-principles.md`：所有修改必读，约束根因分析和实现质量。
-- `02-delivery-workflow.md`：所有修改必读，定义验证、changelog 和 Git 交付。
-- `03-observability.md`：所有运行时修改必读，定义日志、指标和 Trace。
-- `scenarios/*.md`：按路径或变更类型选择性读取。
+- `00-project.md`：所有任务必读，区分现状、目标、厂商范围和信息源。
+- `01-engineering-principles.md`：所有修改必读，约束根因、职责、错误和并发。
+- `02-delivery-workflow.md`：所有修改必读，约束验证、changelog 和 Git。
+- `03-observability.md`：运行时代码必读，约束诊断证据和秘密保护。
+- `scenarios/*.md`：由根 `AGENTS.md` 按路径和行为显式路由。
 
-## 编写规则
+## 编写与维护
 
-1. 规则必须可执行，避免“保持高质量”这类无法判定的口号。
-2. 每条重要规则尽量包含适用条件、正确示例、反例和验证方式。
-3. 项目方向写入 `00-project.md` 或设计文档；不要在多个场景文件重复架构结论。
-4. 新增场景规则时，同步更新根 `AGENTS.md` 的场景索引。
-5. 规则与 Approved Baseline 冲突时，先确认设计是否变化，再同步修改两者。
-6. 规则变更本身也走 `02-delivery-workflow.md`，生成 changelog 并提交。
+1. 规则必须可判定，写清适用条件、禁止项和验证方式，避免空泛口号。
+2. 项目方向只在 `00-project.md` 与 v3 设计维护；场景文件只写该边界的执行细则。
+3. 新增或重命名场景规则时同步更新根索引。
+4. 规则与 v3 设计冲突时，先确认架构是否变化，再同步修改，不让两套事实并存。
+5. 官方厂商行为引用一手文档；时效性能力必须记录验证日期、模型、地域和 API 版本。
+6. 规则变更本身遵循 `02-delivery-workflow.md`，创建 changelog 和原子提交。

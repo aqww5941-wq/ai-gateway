@@ -1,47 +1,62 @@
-# Provider、协议与流式规则
+# Provider、Canonical IR 与厂商协议规则
 
-适用于 Provider、Canonical IR、厂商 Codec、能力模型、SSE 与协议错误映射。
+## 1. 基本边界
 
-## 1. 方向
+协议链路必须拆为：
 
-- 外部 API DTO、Canonical IR、厂商 DTO、Codec、Transport 和策略分层。
-- Canonical IR 不是最低公共子集；公共能力结构化表达，厂商特性通过受控 Vendor Extension 保存。
-- 不继续向旧 `provider.ChatRequest` 添加厂商特有字段。新能力按 v2 M1/M2 进入 Canonical IR 和 Adapter。
-- Provider 不同时拥有协议转换、Transport 策略、路由和业务计费职责。
+```text
+Ingress Decoder -> Canonical Request -> Capability Planner
+-> Provider Encoder -> Transport -> Provider Decoder
+-> Canonical Response/Event -> Ingress Encoder
+```
 
-## 2. 能力保持
+Provider Adapter 不负责租户策略、选路、重试、额度或 HTTP Handler。Transport 不理解 Canonical 语义；Codec 不直接发网络请求。
 
-Adapter 声明支持某能力，就必须通过对应合约测试：
+## 2. 禁止伪兼容
 
-- Text：角色、顺序、文本和 stop reason 不丢失。
-- Streaming：事件顺序、增量拼接、结束和错误事件正确。
-- Tools：定义、choice、call ID、名称、参数、结果和多轮历史完整。
-- Reasoning：所需字段可正确传输并支持多轮回传。
-- Structured Output：Schema 不被删除、弱化或改写。
-- Multimodal：内容类型、顺序、媒体引用和限制得到验证。
-- Usage：输入、输出、缓存、推理 Token 的含义明确。
-- Error：429、5xx、超时、取消和协议错误正确分类。
+- 首批 Adapter 使用 `ark`、`deepseek`、`qwen` 独立包和版本，不以一个 `openai_compatible` 包加 Base URL/模型名区分。
+- 字段同名不代表语义相同。厂商忽略参数、默认行为差异、模型限制和 region endpoint 都进入 Capability/Translation Report。
+- 未知字段不得盲目透传；未知响应事件不得一律忽略。影响完成、Usage、Tool 或状态的未知事件返回 protocol error。
+- 无法保真转换时在上游调用前拒绝，不删除 Tools、Reasoning、Structured Output、Multimodal、Usage 或 State。
 
-无法保持请求语义时，只能选择兼容 Adapter/Model，或在上游调用前返回明确的 capability error。禁止删除不支持字段后继续请求。
+## 3. Canonical IR 最小语义
 
-## 3. SSE 与流式
+IR 使用 typed Item/Content Block/Event，至少表达：文本、图片/文件引用、tool definition、tool call/result、reasoning、structured output 要求、usage、finish reason、provider state 和 vendor extension。ID、顺序、`call_id`、output/content index 和 reasoning state 必须稳定。
 
-- 使用脱敏 Fixture 和 Golden Test 验证分帧、跨 buffer 事件、空行、`[DONE]`、Unicode、错误帧和异常断流。
-- 不假设一次 Scanner/Read 就得到完整 JSON 事件。
-- 流发送首个客户端字节后，不跨厂商无痕重试；断流必须形成明确错误、审计与账务结果。
-- 客户端取消应立即传播上游，不继续读取、缓存或计费为完整成功。
-- 原始流不得进入普通日志；回放 Fixture 必须脱敏并控制大小。
+每次编码产生 Translation Report：`exact`、`normalized`、`lossy`、`unsupported`。`lossy` 是否允许由显式策略决定；`unsupported` 不执行。
 
-## 4. Transport 与错误
+## 4. 三家 Adapter 的硬约束
 
-- 连接池和超时属于共享 Transport 配置，不在每个 Adapter 复制。
-- 保留上游状态码、受限错误摘要、Retry-After 和 provider error code，映射为稳定内部类型。
-- 不重试确定性的请求校验和协议不兼容错误。
-- 请求日志只能记录安全元数据，不记录 Header、Credential、完整请求或响应。
+### 火山引擎方舟
 
-## 5. 验证
+- 首选 Ark Responses 语义，保留 typed output items、`call_id`、`previous_response_id`、thinking 和内置工具事件。
+- Chat 与 Responses 是两个 dialect version，不能共享未验证字段集合。
+- Endpoint、模型、region 与 thinking/tool 支持进入能力矩阵；只对官方文档和实测覆盖的组合标记 verified。
 
-- 单元与 Golden Test 覆盖双向转换。
-- 所有 Adapter 运行同一 Conformance Suite。
-- 使用 mock upstream 验证 Header、URL、错误分类、取消和超时。
-- 流式使用脱敏协议回放，验证首字节前后不同失败阶段。
+### DeepSeek
+
+- 显式解析 `reasoning_content` 与 `content`，流式时保持二者顺序和事件类型。
+- thinking 模式发生 tool call 后，后续请求必须完整回传该 assistant 消息的 `reasoning_content`；丢失会导致 400，Canonical State 和多轮编码必须覆盖此回归。
+- JSON Output 是 `json_object` 语义，不冒充严格 JSON Schema；Prompt 约束和可能空内容进入文档/测试。
+- strict tool mode 若使用 beta endpoint，必须作为独立 Capability/Endpoint 配置，不能默认为稳定生产能力。
+
+### Qwen（阿里云百炼）
+
+- Chat 与 Responses dialect 分开建模；Responses 的 `previous_response_id`、typed output 和内置工具不可降格为字符串。
+- Chat thinking 使用模型支持的 `enable_thinking`/`reasoning_content`；Responses 依据当前文档使用 `reasoning.effort`，不混用参数。
+- 流式 Usage 处理 `stream_options.include_usage`，不能假定每个 chunk 都有 Usage。
+- 多模态、JSON mode、工具、仅流式模型和最大 Token 参数均按具体模型/region/API version 声明。
+- Workspace 专属 Endpoint 与地域是配置的一部分；禁止把旧 URL 或单一全球 Base URL 写死。
+
+## 5. SSE 与 Commit
+
+- Parser 支持跨 buffer、CRLF、多 `data:` 行、Unicode、注释/heartbeat、流内 error、异常 EOF 和超大事件限制。
+- 内部统一为 typed events，例如 started、text.delta、reasoning.delta、tool_call.arguments.delta、usage、completed、failed。
+- 首个可写合法事件前允许按策略 Retry/Fallback；Commit 后只能在当前协议内显式完成或失败。
+- 客户端写失败立即取消上游并进入确定的 Usage 结算路径，不继续发送终止标记。
+
+## 6. 证据与测试
+
+- 每项能力必须关联官方文档、脱敏 Golden/Replay 和 Adapter revision。
+- Offline Conformance 不等于真实 Provider 验证。真实 Smoke 记录模型、region、endpoint、日期和结果；无 Key 标记 unverified。
+- Fixture 禁止包含 API Key、Authorization、完整用户内容、PII 或可关联账户的 ID。

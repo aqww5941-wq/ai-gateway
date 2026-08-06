@@ -1,10 +1,10 @@
 # AI Gateway v3 企业级重构设计文档
 
-> 状态：Proposed（待确认后进入实现）
+> 状态：Current Baseline（厂商范围已确认，按 M0～M6 实施）
 >
 > 日期：2026-08-06
 >
-> 适用代码基线：`master@8af72ae`
+> 适用代码基线：`master@c751bab`
 >
 > 目标：把当前功能密集的个人项目升级为可验证、可演进、可部署的企业级 LLM Gateway，同时形成一条面试时能够独立解释的 Go 工程主线。
 
@@ -14,7 +14,7 @@
 
 1. **HTTP 入口统一采用 Gin，核心业务不依赖 Gin。** 数据面与控制面均使用独立 `gin.Engine`，通过两个监听端口隔离；流式数据面仍直接使用底层 `http.ResponseWriter`、`http.Flusher` 和 `context.Context` 控制连接生命周期。
 2. **多厂商能力以协议转换为核心，而不是 URL 切换。** 引入 Ingress Codec、Canonical IR、Capability Planner、Native Adapter、统一流事件和 Translation Report。
-3. **先支持少量厂商的完整能力，再扩展厂商数量。** 第一阶段覆盖 OpenAI Responses/Chat Completions、Anthropic Messages、Gemini GenerateContent，以及经过合约测试的 OpenAI-compatible dialect；不再声称兼容“所有 OpenAI 兼容端点”。
+3. **先支持有真实 Credential 可验收的国内厂商，再扩展数量。** 客户端保留 OpenAI Chat Completions/Responses 兼容入口；首批上游只做火山引擎方舟、DeepSeek 和阿里云百炼 Qwen，三家分别实现 Native Dialect Adapter，不再声称兼容“所有 OpenAI 兼容端点”。
 4. **企业能力围绕不变量设计。** 鉴权、租户、路由、额度、账本、审计和配置发布均有明确事务、失败语义与可观测证据。
 5. **“企业级”是验收结果，不是形容词。** 在多实例、故障注入、并发额度、协议合约、持续运行和真实调用方未通过前，README 与简历不得提前使用“生产级/企业级”。
 
@@ -57,7 +57,7 @@
 ### 2.1 目标
 
 - 对客户端提供稳定的 OpenAI Chat Completions 与 Responses 入口。
-- 原生适配 OpenAI、Anthropic、Gemini，并支持有明确 dialect 的 OpenAI-compatible 厂商。
+- 原生适配火山引擎方舟、DeepSeek 和阿里云百炼 Qwen；协议相似也必须使用独立 dialect 与能力证据。
 - 在路由前完成请求能力推导、模型能力校验和转换损失检查。
 - 正确处理非流式、SSE、Tool Call、Reasoning、Structured Output、Multimodal 和 Usage。
 - 支持组织、项目、API Key、Provider Credential、Virtual Model、Policy、Budget 和不可变 Usage Ledger。
@@ -98,7 +98,7 @@ flowchart LR
     IR --> POLICY["Capability + Policy Planner"]
     POLICY --> EXEC["Execution Engine"]
     EXEC --> ADAPTER["Native Provider Adapters"]
-    ADAPTER --> U["OpenAI / Anthropic / Gemini / Dialects"]
+    ADAPTER --> U["Volcengine Ark / DeepSeek / Qwen"]
 
     APP --> QUOTA["Reservation + Usage Ledger"]
     ADMIN --> CONFIG["Versioned Runtime Configuration"]
@@ -191,10 +191,9 @@ internal/protocol/ingress/
   openaichat/                   # /v1/chat/completions Codec
   openairesponses/              # /v1/responses Codec
 internal/provider/
-  openai/                       # Responses/Chat Native Codec
-  anthropic/                    # Messages Native Codec
-  gemini/                       # GenerateContent Native Codec
-  openaicompat/                 # 显式 dialect profile
+  ark/                          # 方舟 Responses/Chat Codec
+  deepseek/                     # DeepSeek Chat/Reasoning Codec
+  qwen/                         # 百炼 Chat/Responses Codec
   transport/                    # HTTP Client、连接池、超时、TLS
   conformance/                  # 共享 Adapter 合约测试
 internal/routing/               # Capability Gate、Policy、Planner
@@ -215,15 +214,23 @@ testdata/providers/             # 脱敏请求、响应、SSE Golden Fixture
 
 | 协议/厂商 | 第一阶段支持 | 必须覆盖 |
 | --- | --- | --- |
-| OpenAI Chat Completions Ingress | 是 | Text、Tools、JSON Schema、Reasoning 字段、Vision、SSE、Usage |
-| OpenAI Responses Ingress/Egress | 是 | Typed Items、Tools、Reasoning、Structured Output、State、Typed SSE |
-| Anthropic Messages Egress | 是 | System、Content Blocks、Tool Use/Result、Thinking、Streaming、Usage |
-| Gemini GenerateContent Egress | 是 | Content/Parts、Function Call、Structured Output、Multimodal、SSE |
-| OpenAI-compatible Dialect | 是 | 每个 dialect 独立能力矩阵与 Fixture，不做无限透传承诺 |
-| Gemini Interactions | 后续 | 作为独立 Adapter 版本接入，不与 GenerateContent 混为同一协议 |
+| OpenAI Chat Completions Ingress | 是 | Text、Tools、JSON/Schema 请求意图、Reasoning 扩展、Multimodal、SSE、Usage |
+| OpenAI Responses Ingress | 是 | Typed Items、Tools、Reasoning、Structured Output、State、Typed SSE |
+| 火山引擎方舟 Egress | 是 | Responses 优先；typed Items、`call_id`、`previous_response_id`、Thinking、Tools、Streaming、Usage |
+| DeepSeek Egress | 是 | Chat、`reasoning_content`、Thinking + Tool 回传、JSON Object、SSE、Usage |
+| Qwen（阿里云百炼）Egress | 是 | Chat/Responses、Thinking、Tools、模型相关 Multimodal/JSON、Typed SSE、Usage |
+| 通用 OpenAI-compatible Egress | 后续 | 只有建立独立 dialect、Fixture 与实测证据后才接入 |
+| OpenAI/Anthropic/Gemini Egress | 后续 | 当前无 API Credential，不进入首批能力声明和 Exit Gate |
 | Realtime/WebSocket/Batch | 后续 | 先预留事件模型，不在首期实现 |
 
-OpenAI 官方已将 Responses 作为新项目推荐入口，且 Responses 使用 typed Items 和 typed streaming events；Anthropic Streaming 包含命名事件、Content Block、Tool JSON Delta、Thinking 和流内 Error；Gemini 的 GenerateContent 与 streamGenerateContent 使用 Content/Parts，并支持多模态和函数调用。因此内部模型必须基于“有类型的 Item/Block/Event”，不能再使用单一字符串消息。
+三家都存在“看起来兼容 OpenAI、实际语义并不相同”的部分：方舟 Responses 使用 response item、`call_id` 和 `previous_response_id`；DeepSeek 在 Thinking + Tool 场景要求后续请求完整回传 `reasoning_content`，缺失会返回 400；Qwen 同时提供 Chat 与 Responses，但只处理文档明确列出的兼容参数，地域 Endpoint、Thinking 参数和模型能力也不同。因此内部模型必须基于 typed Item/Block/Event 和显式 Provider State，不能继续使用单一字符串消息或通用 Base URL 转发。
+
+### 6.1.1 三家能力验证策略
+
+- **方舟：** 以 Responses 为主线证明 typed item、built-in tool、thinking 和 vendor-managed conversation；Chat 作为独立 dialect，不共享未验证字段集合。
+- **DeepSeek：** 优先证明 `reasoning_content`、thinking + tool call 多轮回传、SSE 和 JSON Object。Beta strict tool endpoint 作为实验能力，不默认进入稳定路由。
+- **Qwen：** 分开验证 Chat 与 Responses；模型、地域、Workspace Endpoint、`enable_thinking`/`reasoning.effort`、仅流式限制和多模态能力全部进入 Capability Evidence。
+- **离线与在线分层：** CI 使用脱敏 Golden、SSE Replay 和 Conformance；真实 Smoke Test 通过 `ARK_API_KEY`、`DEEPSEEK_API_KEY`、`DASHSCOPE_API_KEY` opt-in 执行。没有 Key 时标记 `unverified`，不能用 Mock 伪造 verified。
 
 ### 6.2 Canonical IR
 
@@ -666,6 +673,8 @@ secret scan + dependency review
 
 ## 16. 实施里程碑
 
+`M` 是 Milestone（里程碑），不是模型版本。`M0` 表示第 0 个里程碑：先建立可信基线，使后续每次失败都能区分旧问题与新回归；它不是“先交付一个功能缩水版”。
+
 ### M0：可信基线（3～5天）
 
 交付：
@@ -689,27 +698,27 @@ Exit Gate：新环境可按文档启动；质量门禁全绿；构建不污染�
 
 Exit Gate：Handler 不直接访问具体 Provider/Store；流取消和优雅关闭有测试；核心包不依赖 Gin。
 
-### M2：Canonical IR 与 OpenAI 双入口（6～8天）
+### M2：Canonical IR 与双 Ingress（6～8天）
 
 交付：
 
 - Canonical Item/Block/Event、Capability、Translation Report；
 - Chat Completions 与 Responses Ingress；
-- OpenAI Native Adapter；
-- Text、Tools、Structured Output、Reasoning、Vision、Streaming Golden。
+- Provider-independent GenerationService 与可注入测试 Transport；
+- Text、Tools、Structured Output、Reasoning、Multimodal、Streaming Golden。
 
 Exit Gate：双入口经过同一 GenerationService；typed event 不降格为字符串；不支持能力在上游前拒绝。
 
-### M3：Anthropic、Gemini 与 Dialect（8～12天）
+### M3：国内三厂商 Native Dialect Adapter（8～12天）
 
 交付：
 
-- Anthropic Messages Native Adapter；
-- Gemini GenerateContent Native Adapter；
-- DeepSeek 等 OpenAI-compatible dialect profile；
-- Adapter Conformance Suite 与脱敏 SSE Fixture。
+- 火山引擎方舟 Responses/Chat Adapter；
+- DeepSeek Chat/Reasoning Adapter；
+- Qwen Chat/Responses Adapter；
+- Adapter Conformance Suite、脱敏 SSE Fixture 与 opt-in 真实 API Smoke Matrix。
 
-Exit Gate：每个声明能力均有合约测试；Tool/Reasoning/Usage/Stream Error 不丢失；未知事件可控处理。
+Exit Gate：三家各自的 Codec 与 Capability Evidence 独立；每个声明能力均有合约测试，持有 Key 的目标完成真实 Smoke；Tool/Reasoning/Usage/Provider State/Stream Error 不丢失；未实测组合明确为 unverified。
 
 ### M4：能力路由与韧性状态机（6～8天）
 
@@ -752,9 +761,9 @@ Exit Gate：两实例配置一致；依赖故障符合设计；性能结果可�
 OpenAI Chat/Responses Client
 -> Gin Data Plane
 -> Canonical IR + Capability Check
--> OpenAI / Anthropic / Gemini Native Adapter
+-> Ark / DeepSeek / Qwen Native Dialect Adapter
 -> Typed SSE / Tool Call / Usage
--> Conformance Test + Trace
+-> Offline Conformance + Real API Smoke + Trace
 ```
 
 M4～M6 用于把项目从“协议工程亮点”提升为“企业平台与一致性亮点”。
@@ -764,19 +773,19 @@ M4～M6 用于把项目从“协议工程亮点”提升为“企业平台与一
 完成对应里程碑后，可围绕三个问题讲述：
 
 1. **为什么使用 Gin 但不让核心依赖 Gin？** 说明框架用于入口生产力和控制面契约，标准库用于流生命周期，业务以 `context.Context` 和 Ports 解耦。
-2. **为什么不能只做 OpenAI-compatible 转发？** 用 OpenAI typed Items、Anthropic Content Blocks/Tool JSON Delta、Gemini Parts 的差异解释 Canonical IR、Capability 与 Translation Report。
+2. **为什么不能只做 OpenAI-compatible 转发？** 用方舟的 response item/state、DeepSeek 的 reasoning 回传约束、Qwen 的 Chat/Responses 与地域/模型差异解释 Canonical IR、Capability Evidence 和 Translation Report。
 3. **企业网关如何保证钱和语义都不丢？** 用 Commit Barrier、能力等价 Fallback、Reservation/Settlement/Ledger 和故障注入说明正确性。
 
 简历只有在完成 M0～M3 后才可以写：
 
-> 基于 Gin 构建双平面 LLM Gateway，将 OpenAI Responses/Chat、Anthropic Messages 与 Gemini GenerateContent 转换为 Canonical IR；通过模型能力矩阵与 Adapter Conformance Test 保证 Tool Calling、Structured Output、Reasoning 和 SSE 事件在跨厂商路由中不被静默丢失。
+> 基于 Gin 构建双平面 LLM Gateway，以 Canonical IR 原生适配火山方舟、DeepSeek 与 Qwen 的 Chat/Responses dialect；通过模型级 Capability Evidence、Adapter Conformance 与真实 API Smoke Test，保证 Tool Calling、Reasoning、Structured Output、Usage 和 SSE 状态在跨厂商路由中不被静默丢失。
 
 完成 M4～M6 且有真实数据后再增加多租户、账本、多实例和性能数字。
 
 ## 18. 设计验收清单
 
-- [ ] 用户确认 Gin 双平面与核心框架无关的取舍。
-- [ ] 用户确认首批协议和厂商范围。
+- [x] Gin 双平面与核心框架无关的边界已纳入当前基线。
+- [x] 首批上游固定为火山方舟、DeepSeek、Qwen；国外厂商不进入首批验收。
 - [ ] 每个里程碑拆成独立 Issue 和原子提交。
 - [ ] 公共 API、Canonical IR、账本和配置 Snapshot 分别形成 ADR。
 - [ ] 修改运行时代码前先建立当前行为回归测试。
@@ -786,7 +795,11 @@ M4～M6 用于把项目从“协议工程亮点”提升为“企业平台与一
 
 - [Gin Middleware 官方文档](https://gin-gonic.com/en/docs/middleware/using-middleware/)：Gin 支持全局、路由组和单路由中间件，适合划分数据面与控制面入口职责。
 - [Gin Binding 与 Validation 官方文档](https://gin-gonic.com/en/docs/binding/binding-and-validation/)：控制面 DTO 使用显式 Binding/Validation，并避免 MustBind 提前写响应造成错误映射失控。
-- [OpenAI Responses 迁移官方文档](https://developers.openai.com/api/docs/guides/migrate-to-responses)：Responses 是新项目推荐入口，使用 typed Items、Tool/Reasoning 状态和 typed streaming events。
-- [Anthropic Streaming 官方文档](https://platform.claude.com/docs/en/build-with-claude/streaming)：Messages Stream 包含命名 SSE、Content Block、Tool 参数 Delta、Thinking、Usage 与流内 Error。
-- [Gemini GenerateContent 官方 API](https://ai.google.dev/api/generate-content)：请求以 Content/Parts 表达文本和多模态，流式接口返回 GenerateContentResponse 序列。
-- [Gemini API 总览](https://ai.google.dev/api)：区分 Interactions、GenerateContent、SSE、Live、Batch 与 Embedding；后续协议应作为独立 Adapter 版本演进。
+- [火山方舟 Responses 工具调用官方文档](https://www.volcengine.com/docs/82379/1958524?lang=zh)：Responses 使用 function call item、`call_id`、`previous_response_id`，并提供内置工具与 typed output。
+- [火山方舟快速入门官方文档](https://www.volcengine.com/docs/82379/1795150)：给出 Ark `/api/v3` Endpoint、Responses 调用和 `thinking` 扩展。
+- [DeepSeek Thinking Mode 官方文档](https://api-docs.deepseek.com/guides/thinking_mode)：Thinking + Tool 场景必须在后续请求完整回传 `reasoning_content`，否则返回 400。
+- [DeepSeek Tool Calls 官方文档](https://api-docs.deepseek.com/guides/tool_calls)：区分普通、Thinking 和 Beta strict tool 模式。
+- [DeepSeek JSON Output 官方文档](https://api-docs.deepseek.com/guides/json_mode/)：`json_object` 需要 Prompt 约束，并明确存在偶发空内容风险。
+- [Qwen Responses 官方文档](https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-responses)：Responses 只处理明确列出的兼容参数，支持 typed output、`previous_response_id`、地域专属 Endpoint 和内置工具。
+- [Qwen 流式输出官方文档](https://help.aliyun.com/zh/model-studio/stream)：Chat 流式 Thinking 分离 `reasoning_content`/`content`，Usage 通过 `stream_options.include_usage` 获取。
+- [Qwen 深度思考官方文档](https://help.aliyun.com/zh/model-studio/deep-thinking/)：模型对 `enable_thinking` 和思考模式的支持存在差异，必须按模型建能力矩阵。

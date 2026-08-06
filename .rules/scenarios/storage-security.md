@@ -1,44 +1,35 @@
-# 存储、鉴权、配额与安全规则
+# Store、安全、租户、额度与账本
 
-适用于 Store、Migration、API Key、Credential、RBAC、Quota、Budget、Usage 和 Ledger。
+## 1. 租户与授权
 
-## 1. 安全与租户边界
+- Organization -> Project -> Gateway Key/Policy/Budget；所有事实表和查询必须有租户边界。
+- Repository 方法显式接收 tenant/project scope，禁止先查全局 ID 再由调用方补授权。
+- 跨租户反向测试必须覆盖读、写、列表、导出、审计和缓存键。
+- 控制面使用 OIDC/Session + RBAC；本地 bootstrap admin 只允许显式开发模式。
 
-- Gateway Key 明文只在创建时返回一次；存储使用可检索前缀和高成本/安全哈希策略。
-- 上游 Credential 使用认证加密，主密钥来自环境变量、Secret 或 KMS，不与密文同库存放。
-- 所有关键查询显式包含 tenant/project 边界；跨租户访问必须有反向测试。
-- 比较秘密使用常数时间方法；缓存失效必须与禁用、轮换和删除语义一致。
-- 日志、Trace、审计、错误和管理 API 不返回完整秘密。
+## 2. Key 与 Provider Credential
 
-## 2. 配额与账务
+- Gateway Key 使用可定位 ID + 高熵 secret；数据库只保存前缀和 HMAC 摘要，常数时间比较。
+- Provider Credential 使用 envelope encryption，存 credential reference、key version 和 rotation state；生产主密钥来自 KMS/Secret Manager。
+- 禁止在配置、数据库、日志、错误、管理 API、Fixture 或 changelog 输出明文 Credential。
+- Provider Base URL 来自 allowlisted Endpoint；默认禁 Redirect，防止 SSRF 和凭据转发到恶意主机。
 
-- 请求前“查询余额”、结束后“累加用量”不是可接受的最终模型。
-- 目标流程是原子预占、实际结算、失败释放、必要冲正，并使用 request/event 幂等键。
-- 日/月额度、Token 和金额使用明确单位与整数表示；价格必须有快照版本。
-- 流取消、断流、上游缺失 Usage、重复回调和超时都要有确定账务状态。
-- Ledger 事件不可由普通更新接口篡改；修正通过新增冲正事件完成。
+## 3. Quota 与 Usage Ledger
 
-配额或账务存储错误默认不得继续产生不可计量费用。若业务要求 Fail Open，必须有经批准的模式、风险上限、审计事件、告警和补偿流程，不能只写 `next.ServeHTTP`。
+状态至少为 `Requested -> Reserved -> InFlight -> Settled/PartiallySettled/Released/NeedsReconcile`。
 
-## 3. Migration 与事务
+- 请求前原子预占估算 Token/金额，完成后按 Usage 结算并释放差额。
+- request/event ID 保证幂等；Ledger 只追加，修正使用 reversal/adjustment。
+- Token/金额使用整数或 Decimal；保存请求时 Price Snapshot。
+- 取消、断流、缺 Usage、超时和重复回调有确定状态；估算必须标记 `estimated=true`。
+- Store 故障默认 Fail Closed；不得先查询后累加造成并发穿透。
 
-- Migration 版本单调、可重复检测、失败原子；生产数据不依赖手工改表。
-- 破坏性 Schema 变化先提供扩展、回填、双读/切换、清理方案。
-- SQLite standalone 与 PostgreSQL cluster 通过 Repository/Quota Conformance Suite 保持业务语义一致。
-- 事务边界围绕业务不变量设计，不围绕单个 SQL 调用设计。
-- 所有写入错误必须返回或进入可靠 Outbox，不得只记录后继续声称成功。
+## 4. 数据库与迁移
 
-## 4. 管理 API
-
-- 创建、更新、禁用、删除 Key 的权限和审计一致。
-- 列表接口只返回前缀/掩码，不返回哈希或密文。
-- 更新接口区分未提供、零值和显式清空，避免部分更新歧义。
-- 安全/账务 API 变化属于 L4，必须有威胁模型、并发和故障测试。
+- 生产事实源为 PostgreSQL；SQLite 只用于 standalone，并通过 Repository Conformance 保持核心语义。
+- Schema 变更使用版本化 migration，包含升级、兼容窗口、回滚/前滚策略和大表影响。
+- 事务边界围绕业务不变量，不把网络 Provider 调用放进数据库事务。
 
 ## 5. 验证
 
-- Migration 在空库、旧库、重复启动和中途失败场景测试。
-- 配额通过并发压力验证无穿透；幂等键验证重复事件不重复扣费。
-- 测试 Key 禁用立即生效、轮换、缓存失效和常数时间比较边界。
-- 注入数据库不可用、锁冲突和提交失败，验证 Fail Open/Closed 契约和审计。
-- 执行 Secret Scan，并人工检查日志和错误响应。
+覆盖并发预占、重复结算、释放/冲正、Store 故障、Key 禁用/轮换、Credential 解密失败、跨租户访问、SSRF/Redirect 和日志 Secret Scan。安全失败不得只测 happy path 状态码。

@@ -1,39 +1,28 @@
 # React 管理端规则
 
-适用于 `web/**`。当前技术栈为 React 19、TypeScript strict、Vite 和 Tailwind。
+## 1. 契约与职责
 
-## 1. 源与产物
+- 管理端只消费版本化控制面 API，不复制 Provider 能力、权限、价格或路由决策逻辑。
+- TypeScript 类型优先从 OpenAPI/Schema 生成或集中维护；不得在页面散落不一致 DTO。
+- 后端返回 capability status、evidence、translation warning 和 config revision，前端负责解释展示，不自行推测“支持”。
+- 任何 Credential 字段只允许创建/轮换时输入，读取接口永不回显明文。
 
-- 只修改 `web/src/`、构建配置和依赖声明等源文件，不手工修改 `web/dist/` 或 `internal/static/dist/`。
-- 当前双份产物是 `BASE-001`，在 ADR-002 落地前不得发明第三套复制流程。
-- 依赖版本以 `web/package-lock.json` 锁定；没有必要不要同时更换多项 UI 依赖。
+## 2. 必须呈现的状态
 
-## 2. 组件与状态
+- loading、empty、error、stale、permission denied、conflict/revision mismatch 和 partial dependency failure。
+- Provider/模型显示 `verified/documented/experimental/unverified/unsupported`、地域、协议版本和最近实测时间。
+- 配置发布显示 validation、published、restart required、rejected 和 rollback 状态。
+- 路由 Dry Run 展示候选、拒绝原因和能力缺口，不只显示最终厂商。
 
-- 页面组件负责呈现和交互，API 契约集中在 `web/src/api.ts` 与类型定义中。
-- 避免把服务端业务规则复制到前端；权限、配额和路由真值由后端决定。
-- 异步页面必须处理 loading、empty、error、success 和刷新中状态。
-- 错误不能通过隐藏入口或返回空数组伪装成功。向用户显示安全、可操作的信息，保留请求追踪 ID。
-- Polling 必须在卸载时停止，避免重叠请求，并明确后台标签页和错误退避行为。
-- 保持键盘可操作、可见焦点、语义标签、颜色对比和窄屏布局。
+## 3. 安全与可用性
 
-## 3. TypeScript 与 API
+- Token 不写 localStorage、URL、日志或错误上报；敏感输入默认遮罩且禁止意外回填。
+- 权限不是隐藏按钮即可，后端必须授权；前端仍应明确提示无权限。
+- 表单使用服务端同源 Schema 约束，提交冲突不能静默覆盖。
+- 验证键盘操作、焦点、颜色对比、窄屏、长文本和中文错误信息。
 
-- 保持 `strict`、`noUnusedLocals`、`noUnusedParameters` 通过，不用 `any` 绕过契约。
-- 网络响应先通过明确类型或运行时校验边界，再进入组件状态。
-- HTTP 401/403、429、5xx 和网络失败应区别呈现；不能一律清空数据或强制退出。
-- 不把 Token 写入日志、错误上报或 URL。修改认证存储策略属于安全契约变更，必须读取 `storage-security.md`。
-- API 变更必须同步后端、类型、页面状态、错误处理和文档。
+## 4. 构建与测试
 
-## 4. 体验约束
-
-- 遇到兼容性或实现问题时，优先修复根因；不得删除动画、实时刷新、错误详情或完整功能，改成更差体验来换取表面稳定。
-- 若某功能暂不可用，应显示原因、影响范围、恢复状态或重试入口，而不是静默消失。
-- 优化渲染前先用数据证明瓶颈，避免无依据的 memo、缓存和状态复制。
-
-## 5. 验证
-
-- 执行 `npm run build`，它同时运行 TypeScript 检查。
-- 若修改依赖，在洁净依赖环境验证 `npm ci`。
-- 手工或自动验证登录、加载、空数据、API 错误、权限不足、窄屏和刷新。
-- 项目建立 lint/test 脚本后必须运行；脚本尚不存在时不得声称已运行。
+- 只编辑 `web/src` 等源文件，不手改 `web/dist` 或嵌入副本。
+- 覆盖组件/流程的加载、失败、空数据、权限、revision conflict 和 Secret 不回显。
+- 按实际 package scripts 运行 lint/test/build；构建产物只有一个生成源，构建后不产生未预期工作树变化。

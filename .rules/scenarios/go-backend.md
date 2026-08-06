@@ -1,49 +1,31 @@
 # Go 后端规则
 
-适用于 `cmd/**`、`config/**` 和 `internal/**` 中的 Go 代码。项目模块与最低版本以 `go.mod` 为准。
+适用于 `cmd/**`、`internal/**`、`config/**` 和其他 Go 运行时代码。
 
-## 1. 代码结构
+## 分层与接口
 
-- 使用标准 Go 风格并对本次修改文件执行 `gofmt`。
-- 包职责保持清晰；避免新增笼统的 `utils`、全局可变状态或跨层 DTO。
-- 构造函数负责验证自身所需依赖；无效配置应在进入请求热路径前失败。
-- 接口放在消费方或稳定边界，避免为了 mock 给每个结构体创建接口。
-- HTTP Handler 只处理协议、上下文和响应映射，核心决策下沉到可测试组件。
-- 数据面保持 `net/http`，不要为局部便利引入 Web 框架。
+- `cmd` 只负责配置加载、依赖组装、生命周期和信号处理。
+- HTTP 层只依赖应用服务；应用层依赖 Ports；Provider、Store、Redis、Observer 是 Adapter。
+- 接口由消费方定义，保持最小；禁止为了 Mock 建立覆盖整个实现的大接口。
+- Canonical/Domain 不导入 Gin、SQL Driver、Redis Client 或厂商 SDK。
+- 旧 `provider.ChatRequest` 只允许在迁移适配层继续存在，不新增厂商能力字段。
 
-## 2. Context、并发和资源
+## Context、并发与生命周期
 
-- 请求派生操作必须传播 `context.Context`，取消后停止重试、Fallback 和流读取。
-- Goroutine 必须有明确退出条件和所有者；Channel 的关闭方必须唯一。
-- 共享状态使用不可变快照、atomic 或最小范围锁，并通过 Race Test 验证。
-- HTTP 响应体、数据库 Rows、Ticker、Watcher 等资源必须关闭；关闭失败是否影响结果需要明确处理。
-- 不在持锁期间执行网络、磁盘、日志大对象序列化或可能阻塞的回调。
-- 超时由配置契约统一管理，不在调用点散落魔法常量。
+- 所有阻塞 I/O 和请求链路接收并传播 `context.Context`。
+- 不保存或复用请求 Context；不得用 `context.Background()` 切断取消，除非是有独立生命周期的后台任务。
+- 每个 goroutine 明确 owner、退出条件和取消；测试取消、超时、关闭与 goroutine 泄漏。
+- HTTP Client/Transport 复用并设置分阶段超时；禁止每请求创建 Client，长 SSE 不使用会截断整流的总超时。
+- Shutdown 顺序为停止接收、等待 unary、通知/取消 stream、完成结算与审计、关闭依赖。
 
-## 3. 错误和 HTTP
+## 错误与数据
 
-- 用 `%w` 保留错误链，用稳定错误类型表达可重试性、状态码和错误类别。
-- 读取请求体必须有大小限制；JSON 解码应根据公共契约决定是否拒绝未知字段。
-- 状态码必须与错误类型对应，不把所有上游错误统一映射成 500。
-- 写出 Header 或 SSE 首字节后，不再假设可以安全更换状态码或跨厂商重试。
-- Recovery 只防止进程崩溃，不能代替组件级错误处理；panic 必须带请求标识记录。
+- 包装错误保留操作、稳定分类和 `%w` 原因链；不要暴露秘密或完整上游正文。
+- 金额和 Token 使用整数或固定精度，不使用 float；时间统一明确单位。
+- 可变 Slice/Map 不跨 Snapshot 或 goroutine 无保护共享；构造完成后再发布。
 
-## 4. 测试
+## 测试与质量
 
-- 单元测试优先 table-driven，并清楚命名输入、状态和期望。
-- 外部 HTTP 使用 `httptest.Server` 或可控 Transport，不依赖真实厂商网络。
-- 修复竞态、队列、缓存或热重载必须加入可重复的并发测试，不能只依赖 `time.Sleep` 碰运气。
-- 不通过放宽断言、增加无界重试或跳过测试来获得绿色结果。
-- Benchmark 仅用于已识别的性能热点；性能结论必须附可复现命令与前后数据。
-
-## 5. 验证命令
-
-至少执行受影响包测试；准备提交前执行：
-
-```text
-go test ./...
-go vet ./...
-go build ./cmd/gateway
-```
-
-涉及并发或共享运行时状态时增加 `go test -race ./...`。若 Windows 环境因 CGO 等条件无法运行，必须如实记录原因和替代检查。
+- 表驱动测试覆盖成功、错误、边界、取消；并发状态使用 race test。
+- 网络依赖使用 `httptest.Server` 验证真实 Header、Path、Body、SSE 和取消，不只 Mock 方法调用。
+- 修改 Go 文件至少执行 gofmt、受影响包测试；按风险执行全量 test、race、vet 和 build。

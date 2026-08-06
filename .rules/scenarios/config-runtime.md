@@ -1,42 +1,34 @@
-# 配置、热重载与运行时状态规则
+# 配置契约与 Runtime Snapshot
 
-适用于 `config/**`、组件构造默认值、`Server.Reload`、Feature Flag 和运行时依赖切换。
+## 1. 配置来源
 
-## 1. 配置是公共契约
+- Bootstrap YAML/Env：监听、Store、Redis、KMS、日志、运行模式等启动必需项。
+- Control Plane Store：Provider、Endpoint、Model、Virtual Model、Route、Policy、Budget 和 Feature Flag。
+- Secret Source：环境变量、Secret Manager 或 KMS；秘密不进入普通配置导出。
 
-- YAML 字段必须有明确类型、默认值、约束、敏感性和是否可热重载说明。
-- 使用严格解析拒绝未知字段，避免拼写错误被静默忽略。
-- 环境变量展开后再做必填和语义校验，但日志中的有效配置必须脱敏。
-- 默认值集中管理；构造函数不得各自悄悄选择不同默认值。
-- 无效 duration、URL、Provider、Route、弱默认 Key 等应在启动或 reload 提交前被确定性拒绝。
+同一字段只能有一个明确优先级。严格解析未知字段、类型、范围和交叉引用；无效配置在发布前拒绝，不用默认值掩盖。
 
-错误示例：TTL 解析失败时静默使用一小时，使用户以为配置已生效。
+## 2. 厂商配置
 
-正确方向：返回包含字段路径的配置错误，保持旧快照运行，并记录 reload 被拒绝。
+- Ark、DeepSeek、Qwen 使用独立 provider kind 和 schema，不共享含糊的 `openai_compatible` 配置。
+- Endpoint 包含受控 Base URL、region、protocol version、credential reference、模型和 capability evidence。
+- Qwen Workspace Endpoint、Ark region endpoint、DeepSeek stable/beta endpoint 分开配置；禁止通过请求参数注入任意 URL。
+- 示例只使用明显无效占位符，不提供看似可用的固定 Key。
 
-## 2. 不可变运行时快照
+## 3. Snapshot 发布
 
-- Reload 构建并验证完整新快照，所有组件成功后一次原子发布。
-- 请求必须在整个生命周期使用同一快照，不能读到 Router 新版本和 Cache/Filter 旧版本。
-- 明确字段分类：可热更新、需重建组件、必须重启。
-- 构建失败时保留旧快照，不允许部分配置生效。
-- 旧 Provider、Transport、Watcher 和 Store 的释放必须有生命周期设计，不能在仍有请求使用时关闭。
+1. 读取完整候选配置。
+2. 展开非秘密引用并解析 Secret reference，但不记录值。
+3. 构建 Router、Adapter Registry、Transport、Policy 和 Store 依赖。
+4. 校验所有交叉引用、能力和安全约束。
+5. 成功后生成单调 revision 并一次原子交换。
+6. 失败保持旧 Snapshot 完整可用；不能部分 Reload。
+7. 请求捕获一个 revision，生命周期内不混用；旧资源引用归零后关闭。
 
-## 3. 依赖失败与降级
+## 4. 动态与静态字段
 
-- 是否允许 Redis、Store、Tracing 等依赖失败必须由运行模式和显式策略决定。
-- standalone 可允许的内存回退，不自动适用于 cluster。
-- 安全、鉴权、配额和账务依赖默认不隐式 Fail Open。
-- 降级必须影响 health/readiness 或管理状态，并记录原组件、替代组件、原因、范围和恢复。
-- 不允许“启动成功”掩盖核心能力已关闭。
+每个字段标记 dynamic 或 restart-required。修改 restart-required 字段时发布应拒绝并给出明确原因，不能表面返回成功。配置发布、拒绝、回滚和旧资源清理都要可观测。
 
-## 4. 可观测性
+## 5. 测试
 
-Reload 至少记录：配置版本/摘要、变化区块、验证结果、是否需重启、原子发布结果。禁止记录 API Key、Redis 密码和 Credential。
-
-## 5. 验证
-
-- Table-driven 测试覆盖默认值、未知字段、环境变量、交叉字段和安全校验。
-- Reload 测试覆盖成功、验证失败、组件构建失败、并发请求和资源释放。
-- Race Test 证明不会部分生效或访问已释放组件。
-- 导出脱敏有效配置，验证实际运行配置与用户输入的关系可解释。
+覆盖未知字段、缺失必填、环境变量缺失、非法 URL/region、重复 ID、悬空引用、能力矛盾、Snapshot 构建失败、并发读取、旧资源释放、revision 单调性和 Secret 脱敏。运行 race test 验证原子切换。

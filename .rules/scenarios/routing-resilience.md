@@ -1,58 +1,39 @@
-# 路由、重试、熔断与 Fallback 规则
+# 能力路由、Retry、Breaker 与 Fallback
 
-适用于 `internal/router/`、`retry/`、`breaker/`、相关 Server 调用链和运行时健康策略。
-
-## 1. 路由顺序
-
-固定决策顺序：
+## 1. Planner 顺序
 
 ```text
-能力满足
+协议与所需能力
 -> 租户/项目/Key 权限
--> 数据与合规策略
--> 预算与余额
--> Provider/Model 健康状态
--> 成本、延迟、权重或 Fallback 调度
+-> 地域与合规
+-> 预算/最大成本
+-> Endpoint/Model 健康
+-> 成本、延迟、质量和权重
 ```
 
-禁止先选最快/最便宜目标，再删除不兼容能力或等待上游报错。
+Planner 输出不可变 ExecutionPlan，包含 Snapshot revision、首选与 Fallback、每个目标的能力证明、预算上界和拒绝原因。Provider 调用期间不重新读取全局配置。
 
-## 2. Retry
+## 2. 能力与厂商状态
 
-- 只重试明确标记可重试的错误，例如部分 429、5xx 和传输瞬态错误。
-- 尊重 `Retry-After`、总请求 deadline 和客户端取消。
-- 重试策略必须有次数和总时长上限，使用抖动避免惊群。
-- 记录 attempt、错误类别、等待时间和最终结果。
-- 非幂等操作必须先有幂等键或明确证明重试安全。
+- 能力按 provider、endpoint、region、model、protocol version 和 adapter revision 声明。
+- `verified`、`documented`、`experimental`、`unsupported`、`unverified` 必须区分；只有 Mock 的能力不能进入真实生产候选。
+- Tools、Reasoning、Structured Output、Multimodal、Streaming、Usage 和 Provider-managed State 分别判断，不能用 `supports_chat=true` 代替。
 
-## 3. Circuit Breaker
+## 3. Retry 与 Fallback
 
-- 熔断按稳定的 Provider/Model 或已设计维度隔离，不能让单一模型污染全部目标。
-- 只有能代表目标健康的错误计入失败；客户端参数错误和取消不应误伤 Provider。
-- 状态变化必须产生日志和指标，并验证 open、half-open、closed 和并发探测。
-- 不用放宽阈值或延长 cooldown 掩盖错误分类问题。
+- 只重试稳定分类为可重试且 Context 未取消的错误，遵守 Retry-After、总 Deadline、次数和等待预算。
+- POST 若可能已被上游接收，只有幂等键受支持或能证明请求未写出时才重试。
+- Fallback 重新检查 Capability、Policy、Region 和 Budget；更贵目标先原子调整 Reservation。
+- 流式 Commit 后禁止切换厂商。取消、invalid request、capability mismatch 和权限错误不重试。
+- Hedging 默认关闭；开启需显式成本预算、取消证明、幂等语义和重复结算防护。
 
-## 4. Fallback
+## 4. Circuit Breaker
 
-Fallback 只有在以下条件全部满足时才合法：
+- 隔离键至少为 `endpoint_id + model + region`，必要时加 protocol version。
+- 客户端 4xx、能力拒绝和取消不计上游故障；429、5xx、timeout、transport 和 protocol 按策略分别计权。
+- Half-open 有并发上限；状态变化有日志、指标、事件和恢复测试。
+- 本地 Breaker 保护实例；集群健康摘要用于规划参考，不以 Redis 取代本地保护。
 
-- 候选目标满足完整请求能力和合规约束。
-- 失败发生在允许切换的阶段；流式首字节发出后不得无痕切换。
-- 错误类型允许切换，取消和 deadline 不继续遍历链。
-- 成本、质量和区域差异符合租户策略。
-- 记录原目标、失败原因、候选拒绝原因、最终目标、尝试次数和差异。
+## 5. 验证
 
-正确示例：支持相同 Tools/JSON Schema 的 Provider 在首字节前因 503 切换。
-
-错误示例：Reasoning 模型失败后改用不支持 reasoning 的普通文本模型，并把结果包装成成功。
-
-## 5. “全失败”不是随机选一个
-
-当所有健康候选都不满足时，应返回可解释错误，列出安全的失败类别。不得重新启用不兼容、无权限、超预算或熔断目标来“尽量返回点东西”。
-
-## 6. 验证
-
-- 路由测试覆盖能力、权限、预算、健康和调度顺序。
-- 故障注入覆盖 429、5xx、超时、取消、协议错误和断流。
-- 测试 Fallback 前后请求语义保持，以及所有目标失败时的错误。
-- 并发测试验证轮询、延迟样本、Breaker 和热重载无竞态。
+覆盖 429/Retry-After、5xx、连接失败、读超时、取消、Commit 前后、能力不等价、预算调整、Half-open 并发和状态恢复。断言最终调用次数、选择原因、费用状态和诊断字段，而不只断言 HTTP status。

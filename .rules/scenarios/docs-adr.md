@@ -1,50 +1,34 @@
-# 文档、ADR 与公共契约规则
+# 文档、ADR、API 与兼容性规则
 
-适用于架构决策、API、配置、Schema、Canonical IR、兼容性、README 和发布说明。
+## 1. 事实等级
 
-## 1. 文档职责
+- `Implemented`：代码存在且相关自动测试通过。
+- `Verified`：在 Implemented 基础上通过指定真实厂商/环境验证，并记录证据。
+- `Planned`：设计已明确但未完成。
+- `Experimental`：可运行但契约或验证不完整。
+- `Unsupported/Unverified`：明确不支持或尚无真实证据。
 
-- `README.md`：当前版本真实可运行的能力、启动方式和用户入口。
-- `docs/AI_Gateway_v2_重构升级设计文档.md`：已批准目标、需求编号、里程碑和 Exit Gate。
-- ADR：一个具体且难以逆转的架构决策、备选方案和后果。
-- `changelog/`：每次实现变更的根因、方案、验证与回滚记录。
+README、管理端、发布说明和简历不得混用这些等级。“企业级”“生产级”“全厂商兼容”和性能数字必须有对应 Exit Gate 与可复现报告。
 
-不要把未来能力提前写成当前已支持，也不要用 changelog 代替长期设计文档。
+## 2. 架构与 ADR
 
-## 2. 必须先写 ADR 的变化
+- v3 设计是当前迁移基线；重大变化先更新设计或创建 ADR，并写 Context、Decision、Alternatives、Consequences、Migration 和 Rollback。
+- Gin 边界、Canonical IR、Capability 模型、Provider Adapter、Commit Barrier、Snapshot、Ledger 等核心决策不得只存在代码注释。
+- 文档描述现状时使用当前代码证据，描述目标时标注 milestone；禁止把目标架构写成已实现。
 
-- 公共 API 或 Canonical IR。
-- Provider/Adapter 核心接口。
-- 数据库 Schema、迁移策略和一致性模型。
-- 安全、密钥、租户或账务边界。
-- 构建产物、部署拓扑和运行时快照。
-- 会限制后续选择或迁移代价较高的依赖。
+## 3. 厂商与时效性
 
-ADR 至少包含：状态、背景、问题、约束、候选方案、决定、理由、正负后果、迁移、回滚和验证。
+- 协议行为引用厂商官方一手文档，记录访问/验证日期；不以博客或 SDK 猜测 API 契约。
+- 能力表写明 provider、model、region、endpoint、protocol version、adapter revision 和 evidence status。
+- 客户端协议兼容与真实上游厂商适配分开表述。例如“支持 OpenAI Responses ingress”不能写成“已接入 OpenAI”。
+- 官方文档更新时先做差异分析和 Fixture 回归，再更新能力状态。
 
-## 3. 契约同步
+## 4. API 与 Schema
 
-修改 API、配置或 Schema 时，同步检查：
+- 外部 API 使用版本化 OpenAPI/JSON Schema，定义成功与错误 Envelope、分页、幂等和兼容规则。
+- 增加可选字段通常向后兼容；删除/重命名、收紧校验、改变默认值或错误语义必须有迁移窗口。
+- Provider 原始字段不直接泄露为稳定公共契约；通过 Canonical 或显式 vendor extension 命名空间暴露。
 
-- 请求/响应 DTO 和错误码。
-- OpenAPI 或等价契约文档。
-- 示例配置、环境变量和脱敏有效配置。
-- 数据迁移、兼容窗口与回滚。
-- 前端类型和交互状态。
-- 测试 Fixture、Golden 和 README。
+## 5. 变更记录
 
-若实现与 Approved Baseline 冲突，先修改设计并说明原因，不允许代码先行后补文档。
-
-## 4. 表述质量
-
-- 文档描述可验证事实，不使用没有门槛支持的“生产级”“企业级”“高可用”。
-- 命令、路径、端口和版本必须与仓库实际一致。
-- 示例不得包含可用默认 Key、真实 Credential 或未脱敏数据。
-- 记录已知限制和未完成项，不用模糊措辞掩盖。
-
-## 5. 验证
-
-- 检查链接、路径、命令和代码符号仍存在。
-- 运行文档中的关键启动/构建命令，或明确标注未验证。
-- 检查需求编号、里程碑、ADR 和 changelog 的关联。
-- 确认 README 的“当前能力”没有超前于实际 Exit Gate。
+Changelog 解释根因、用户影响、迁移和实际验证，不逐行复述 diff。引用本地文档使用可稳定定位的仓库路径；引用在线协议使用官方直达链接。
