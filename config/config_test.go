@@ -58,16 +58,201 @@ func TestLoadAppliesDeterministicDefaults(t *testing.T) {
 }
 
 func TestLoadCurrentExample(t *testing.T) {
-	t.Setenv("DEEPSEEK_API_KEY", "task3-deepseek-key")
-	t.Setenv("SILICONFLOW_API_KEY", "task3-siliconflow-key")
-	t.Setenv("DOUBAO_API_KEY", "task3-doubao-key")
-
 	cfg, err := Load("gateway.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.Server.ReadTimeout != 30*time.Second || cfg.Server.WriteTimeout != 120*time.Second {
 		t.Fatalf("example timeouts = %s/%s", cfg.Server.ReadTimeout, cfg.Server.WriteTimeout)
+	}
+	if cfg.Auth.Enabled || len(cfg.Auth.Keys) != 0 {
+		t.Fatalf("example auth = %#v, want disabled without seed keys", cfg.Auth)
+	}
+	if len(cfg.Providers) != 4 {
+		t.Fatalf("example providers = %d, want one invalid legacy provider and three native declarations", len(cfg.Providers))
+	}
+
+	wantCredentials := map[string]string{
+		"ark":      "ARK_API_KEY",
+		"deepseek": "DEEPSEEK_API_KEY",
+		"qwen":     "DASHSCOPE_API_KEY",
+	}
+	for _, provider := range cfg.Providers {
+		if provider.Kind == "" {
+			if provider.BaseURL != "https://example.invalid/v1" || provider.APIKey != "invalid-example-provider-key" {
+				t.Fatalf("legacy example is not safely invalid: %#v", provider)
+			}
+			continue
+		}
+		if provider.RuntimeEnabled() || provider.Evidence.Status != "unverified" {
+			t.Fatalf("native provider %q must be disabled/unverified: %#v", provider.Name, provider)
+		}
+		if provider.Credential.Env != wantCredentials[provider.Kind] || provider.APIKey != "" {
+			t.Fatalf("native provider %q credential = %#v, want env reference only", provider.Name, provider.Credential)
+		}
+	}
+	if cfg.Providers[3].Qwen == nil || cfg.Providers[3].Qwen.WorkspaceID != "invalid-example-workspace-id" || len(cfg.Providers[3].Models) != 1 || cfg.Providers[3].Models[0] != "qwen3.7-flash" {
+		t.Fatalf("qwen bootstrap declaration = %#v", cfg.Providers[3])
+	}
+	if len(cfg.Routes) != 1 || cfg.Routes[0].Targets[0].Provider != "legacy-invalid-example" {
+		t.Fatalf("example routes = %#v, want only the invalid bootstrap route", cfg.Routes)
+	}
+}
+
+func TestREADMEDeclaresNativeProvidersAsBootstrapOnly(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := string(data)
+	for _, required := range []string{
+		"kind: ark",
+		"kind: deepseek",
+		"kind: qwen",
+		"env: ARK_API_KEY",
+		"env: DEEPSEEK_API_KEY",
+		"env: DASHSCOPE_API_KEY",
+		"qwen3.7-flash",
+		"status: unverified",
+		"Native Adapter 尚未实现",
+	} {
+		if !strings.Contains(contents, required) {
+			t.Errorf("README.md missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"覆盖 DeepSeek / SiliconFlow / 豆包等所有 OpenAI 兼容端点",
+		"SILICONFLOW_API_KEY",
+		"DOUBAO_API_KEY",
+		"Bearer sk-test",
+	} {
+		if strings.Contains(contents, forbidden) {
+			t.Errorf("README.md still contains out-of-scope or unsafe claim %q", forbidden)
+		}
+	}
+}
+
+func TestLoadAcceptsIndependentNativeBootstrapSchemas(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+	}{
+		{name: "ark", yaml: `providers:
+  - name: ark-bootstrap
+    kind: ark
+    enabled: false
+    credential: {env: ARK_API_KEY}
+    evidence: {status: unverified}
+    ark:
+      base_url: https://ark.cn-beijing.volces.com/api/v3
+      region: cn-beijing
+      protocol_version: responses-v1
+      endpoint_id: invalid-example-endpoint-id
+    models: [invalid-example-model]
+routes: []
+`},
+		{name: "deepseek", yaml: `providers:
+  - name: deepseek-bootstrap
+    kind: deepseek
+    enabled: false
+    credential: {env: DEEPSEEK_API_KEY}
+    evidence: {status: unverified}
+    deepseek:
+      base_url: https://api.deepseek.com
+      region: global
+      protocol_version: chat-completions-v1
+      endpoint: stable
+    models: [deepseek-v4-flash]
+routes: []
+`},
+		{name: "qwen", yaml: nativeQwenBootstrapYAML},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := loadTestConfig(t, tt.yaml)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(cfg.Providers) != 1 || cfg.Providers[0].Kind != tt.name || cfg.Providers[0].RuntimeEnabled() {
+				t.Fatalf("provider = %#v, want disabled %s declaration", cfg.Providers, tt.name)
+			}
+			if len(cfg.Routes) != 0 {
+				t.Fatalf("routes = %#v, want no route for disabled provider", cfg.Routes)
+			}
+		})
+	}
+}
+
+const nativeQwenBootstrapYAML = `providers:
+  - name: qwen-bootstrap
+    kind: qwen
+    enabled: false
+    credential: {env: DASHSCOPE_API_KEY}
+    evidence: {status: unverified}
+    qwen:
+      base_url: https://invalid-example-workspace-id.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+      region: cn-beijing
+      protocol_version: chat-completions-v1
+      workspace_id: invalid-example-workspace-id
+    models: [qwen3.7-flash]
+routes: []
+`
+
+func TestLoadRejectsUnsafeOrUnrunnableNativeBootstrapConfiguration(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		path    string
+		problem string
+	}{
+		{
+			name:    "enabled before adapter exists",
+			yaml:    strings.Replace(nativeQwenBootstrapYAML, "enabled: false", "enabled: true", 1),
+			path:    "providers[0].enabled",
+			problem: `adapter for provider kind "qwen" is not implemented; set enabled to false`,
+		},
+		{
+			name:    "enabled state omitted",
+			yaml:    strings.Replace(nativeQwenBootstrapYAML, "    enabled: false\n", "", 1),
+			path:    "providers[0].enabled",
+			problem: "must be explicitly set to false while the native adapter is unavailable",
+		},
+		{
+			name:    "evidence overclaims support",
+			yaml:    strings.Replace(nativeQwenBootstrapYAML, "status: unverified", "status: verified", 1),
+			path:    "providers[0].evidence.status",
+			problem: "must be unverified while the native adapter is unavailable",
+		},
+		{
+			name:    "credential is a value instead of a reference",
+			yaml:    strings.Replace(nativeQwenBootstrapYAML, "DASHSCOPE_API_KEY", "literal-secret-value", 1),
+			path:    "providers[0].credential.env",
+			problem: "must be an uppercase environment variable name",
+		},
+		{
+			name:    "workspace host does not match workspace reference",
+			yaml:    strings.Replace(nativeQwenBootstrapYAML, "https://invalid-example-workspace-id.cn-beijing.maas.aliyuncs.com", "https://another-workspace.cn-beijing.maas.aliyuncs.com", 1),
+			path:    "providers[0].qwen.base_url",
+			problem: "must use the controlled endpoint https://invalid-example-workspace-id.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+		},
+		{
+			name: "route references disabled provider",
+			yaml: strings.Replace(nativeQwenBootstrapYAML, "routes: []", `routes:
+  - name: invalid-route
+    match: {model: qwen}
+    strategy: round_robin
+    targets: [{provider: qwen-bootstrap, model: qwen3.7-flash}]`, 1),
+			path:    "routes[0].targets[0].provider",
+			problem: `references disabled provider "qwen-bootstrap"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := loadTestConfig(t, tt.yaml)
+			assertConfigError(t, err, ErrorKindValidation, tt.path, tt.problem)
+		})
 	}
 }
 

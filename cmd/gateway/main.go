@@ -79,6 +79,14 @@ func main() {
 func createProviders(cfg *config.Config, logger *slog.Logger) map[string]provider.LLMProvider {
 	provs := make(map[string]provider.LLMProvider)
 	for _, pCfg := range cfg.Providers {
+		if !pCfg.RuntimeEnabled() {
+			logger.Info("provider bootstrap declaration is disabled",
+				"provider", pCfg.Name,
+				"provider_kind", pCfg.Kind,
+				"evidence_status", pCfg.Evidence.Status,
+			)
+			continue
+		}
 		pLogger := logger.With("provider", pCfg.Name)
 		switch pCfg.Type {
 		case "openai":

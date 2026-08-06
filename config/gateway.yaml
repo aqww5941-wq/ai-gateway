@@ -12,116 +12,77 @@ server:
     max_idle_conns: 200
 
 auth:
-  enabled: true
-  # Seed keys — only imported when DB is empty on first start.
-  # After that, manage keys via admin API.
-  keys:
-    - token: "sk-test-123"
-      name: "admin"
-      role: admin
-      daily_token_limit: 1000000
-
-    - token: "sk-user-demo"
-      name: "demo-user"
-      role: user
-      daily_token_limit: 10000
-      models: "deepseek-v4-flash,kimi"
+  # Safe bootstrap default: no reusable gateway key is shipped in the repo.
+  enabled: false
+  keys: []
 
 providers:
-  - name: deepseek
+  # The legacy example keeps the current process reproducibly startable, but
+  # cannot reach an upstream or authenticate there: .invalid is reserved.
+  - name: legacy-invalid-example
     type: openai
-    api_key: ${DEEPSEEK_API_KEY}
-    base_url: https://api.deepseek.com/v1
+    api_key: invalid-example-provider-key
+    base_url: https://example.invalid/v1
+    models:
+      - invalid-example-model
+
+  # Native provider declarations are schema-only in M0. Their credentials are
+  # references (environment variable names), never secret values. Enabling one
+  # fails validation until its dedicated M3 adapter exists.
+  - name: ark-bootstrap
+    kind: ark
+    enabled: false
+    credential:
+      env: ARK_API_KEY
+    evidence:
+      status: unverified
+    ark:
+      base_url: https://ark.cn-beijing.volces.com/api/v3
+      region: cn-beijing
+      protocol_version: responses-v1
+      endpoint_id: invalid-example-ark-endpoint-id
+    models:
+      - invalid-example-ark-model
+
+  - name: deepseek-bootstrap
+    kind: deepseek
+    enabled: false
+    credential:
+      env: DEEPSEEK_API_KEY
+    evidence:
+      status: unverified
+    deepseek:
+      base_url: https://api.deepseek.com
+      region: global
+      protocol_version: chat-completions-v1
+      endpoint: stable
     models:
       - deepseek-v4-flash
       - deepseek-v4-pro
-  - name: siliconflow
-    type: openai
-    api_key: ${SILICONFLOW_API_KEY}
-    base_url: https://api.siliconflow.cn/v1
-    models:
-      - Pro/moonshotai/Kimi-K2.6
-      - MiniMaxAI/MiniMax-M2.5
-    timeout: 60s
 
-  - name: doubao
-    type: openai
-    api_key: ${DOUBAO_API_KEY}
-    base_url: https://ark.cn-beijing.volces.com/api/v3
+  - name: qwen-bootstrap
+    kind: qwen
+    enabled: false
+    credential:
+      env: DASHSCOPE_API_KEY
+    evidence:
+      status: unverified
+    qwen:
+      base_url: https://invalid-example-workspace-id.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+      region: cn-beijing
+      protocol_version: chat-completions-v1
+      workspace_id: invalid-example-workspace-id
     models:
-      - doubao-seed-2-0-pro-260215
-      - doubao-seed-2-0-mini-260428
-    timeout: 60s
+      - qwen3.7-flash
 
 routes:
-  - name: cheap-first
+  - name: invalid-bootstrap-route
     match:
-      model: deepseek-v4-flash
+      model: invalid-example-model
     strategy: round_robin
     targets:
-      - provider: deepseek
-        model: deepseek-v4-flash
-
-  - name: smart-route
-    match:
-      model: auto
-    strategy: semantic
-    targets: []
-    semantic_rules:
-      - complexity: simple
-        target:
-          provider: doubao
-          model: doubao-seed-2-0-mini-260428
-      - complexity: complex
-        target:
-          provider: doubao
-          model: doubao-seed-2-0-pro-260215
-  
-  - name: siliconflow-kimi
-    match:
-      model: kimi
-    strategy: round_robin
-    targets:
-      - provider: siliconflow
-        model: Pro/moonshotai/Kimi-K2.6
-
-  - name: siliconflow-minimax
-    match:
-      model: minimax
-    strategy: round_robin
-    targets:
-      - provider: siliconflow
-        model: MiniMaxAI/MiniMax-M2.5
-
-  - name: doubao-seed
-    match:
-      model: doubao
-    strategy: semantic
-    targets: []
-    semantic_rules:
-      - complexity: simple
-        target:
-          provider: doubao
-          model: doubao-seed-2-0-mini-260428
-      - complexity: complex
-        target:
-          provider: doubao
-          model: doubao-seed-2-0-pro-260215
-
-  - name: siliconflow-auto
-    match:
-      model: siliconflow
-    strategy: semantic
-    targets: []
-    semantic_rules:
-      - complexity: simple
-        target:
-          provider: siliconflow
-          model: MiniMaxAI/MiniMax-M2.5
-      - complexity: complex
-        target:
-          provider: siliconflow
-          model: Pro/moonshotai/Kimi-K2.6
+      - provider: legacy-invalid-example
+        model: invalid-example-model
 
 rate_limit:
   enabled: false
@@ -129,7 +90,7 @@ rate_limit:
   per_model: 100
 
 quota:
-  enabled: true
+  enabled: false
   reset_hour_utc: 0
 
 cache:

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -8,6 +9,13 @@ import (
 	"ai-gateway/internal/provider"
 	"ai-gateway/internal/router"
 )
+
+func TestNewRejectsConfigurationWithoutRunnableProviders(t *testing.T) {
+	_, err := New(&config.Config{}, &router.Router{}, nil, testLogger)
+	if err == nil || !strings.Contains(err.Error(), "native bootstrap providers must remain disabled until their adapters are implemented") {
+		t.Fatalf("New() error = %v, want actionable native adapter guidance", err)
+	}
+}
 
 func TestNewUsesConfiguredHTTPTimeouts(t *testing.T) {
 	cfg := &config.Config{

@@ -1,16 +1,16 @@
 # AI Gateway
 
-> 多 LLM 厂商统一代理网关 — 一个 OpenAI 兼容入口，接管路由、韧性、缓存、鉴权、配额、过滤、可观测。
+> 正在按 v3 任务书演进的 LLM 网关：当前 M0 先建立可信构建、配置和安全基线。
 
 ## 解决什么问题
 
-接入多家 LLM 厂商（DeepSeek / SiliconFlow / 豆包等），业务代码反复处理 key 轮询、失败重试、限流配额、模型路由、流式兼容、token 计费。AI Gateway 把这些横切关注点抽离为基础设施，业务方只需调一个 `POST /v1/chat/completions`。
+LLM 接入需要统一处理凭据、协议差异、路由、韧性、限流配额、流式响应和 Usage。项目目标是为业务方提供统一入口，但当前代码仍处于迁移期：遗留 OpenAI/Claude 转发路径用于回归，Ark、DeepSeek、Qwen Native Adapter 将在 M3 完成，现阶段不得视为已支持。
 
 ## 核心特性
 
 | 模块 | 说明 |
 | --- | --- |
-| **多厂商适配** | OpenAI 协议适配器，覆盖 DeepSeek / SiliconFlow / 豆包等所有 OpenAI 兼容端点 |
+| **Provider Bootstrap** | Ark / DeepSeek / Qwen 使用独立 Kind、Endpoint 和 Secret reference；当前固定为 disabled/unverified，Native Adapter 尚未实现 |
 | **路由策略** | round_robin / semantic（按 prompt 复杂度分级）/ latency（p99 延迟反比加权） |
 | **韧性** | 熔断器 + 指数退避重试 + singleflight 合并 + 延迟感知路由 |
 | **企业并发控制** | max-in-flight 限流 + 请求队列 + 共享 HTTP 连接池 + 2MB body 限制 |
@@ -41,13 +41,11 @@ Windows 输出 `bin/gateway.exe`，Linux/macOS 输出 `bin/gateway`。也可以�
 `go run ./cmd/build -target frontend` 和 `go run ./cmd/build -target backend`。
 前端只生成到 `internal/static/dist/`，该目录也是 Go 的唯一嵌入输入。
 
-### 2. 配置环境变量
+### 2. 检查安全 Bootstrap 示例
 
-```bash
-export DEEPSEEK_API_KEY=sk-...
-export SILICONFLOW_API_KEY=sk-...
-export DOUBAO_API_KEY=...
-```
+`config/gateway.yaml` 不包含可用的 Gateway Key 或 Provider Credential。三家 Provider 只保存
+`ARK_API_KEY`、`DEEPSEEK_API_KEY`、`DASHSCOPE_API_KEY` 这些环境变量名称，不读取或复制其值；
+默认路由指向 `.invalid` 保留域名，因此没有真实上游调用权限。
 
 ### 3. 启动
 
@@ -61,29 +59,14 @@ export DOUBAO_API_KEY=...
 .\bin\gateway.exe -config C:\path\to\gateway.yaml
 ```
 
-网关监听 `:8081`，管理后台 `http://localhost:8081/admin/dashboard/`。
+网关监听 `:8081`，管理后台 `http://localhost:8081/admin/dashboard/`。安全示例可以启动进程，
+但不能成功调用真实模型；不要通过把 Native Provider 改成通用 `type: openai` 来绕过适配器边界。
 
-### 4. 第一个请求
+### 4. 当前调用边界
 
-```bash
-# 非流式
-curl -X POST http://localhost:8081/v1/chat/completions \
-  -H "Authorization: Bearer sk-test-123" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"你好"}]}'
-
-# 流式
-curl -N -X POST http://localhost:8081/v1/chat/completions \
-  -H "Authorization: Bearer sk-test-123" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"讲个笑话"}]}'
-
-# 语义路由 — simple → mini, complex → pro
-curl -X POST http://localhost:8081/v1/chat/completions \
-  -H "Authorization: Bearer sk-test-123" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"doubao","messages":[{"role":"user","content":"用 Go 实现红黑树"}]}'
-```
+Task 4 不实现真实厂商调用。把任一 Native Provider 的 `enabled` 改为 `true`，配置加载会给出
+“adapter ... is not implemented; set enabled to false”的可操作错误。真实 API Smoke 只会在对应
+Native Adapter 完成后以显式 opt-in 方式运行；Qwen 的预定 Smoke 模型为 `qwen3.7-flash`。
 
 ## 架构
 
@@ -138,26 +121,58 @@ server:
     max_idle_conns_per_host: 50
     max_idle_conns: 200
 
-auth:                               # 鉴权 + RBAC
-  enabled: true
-  keys:                             # 种子 Key（仅首次启动导入）
-    - token: "sk-test-123"
-      name: "admin"
-      role: admin                   # admin | user
-      daily_token_limit: 1000000
+auth:
+  enabled: false                    # 仓库不分发固定 Gateway Key
+  keys: []
 
-providers:                          # 上游厂商
-  - name: deepseek
+providers:
+  - name: legacy-invalid-example   # 仅保证当前遗留进程可启动
     type: openai
-    api_key: ${DEEPSEEK_API_KEY}    # 环境变量
-    base_url: https://api.deepseek.com/v1
+    api_key: invalid-example-provider-key
+    base_url: https://example.invalid/v1
+    models: [invalid-example-model]
+
+  - name: ark-bootstrap
+    kind: ark
+    enabled: false
+    credential: { env: ARK_API_KEY }
+    evidence: { status: unverified }
+    ark:
+      base_url: https://ark.cn-beijing.volces.com/api/v3
+      region: cn-beijing
+      protocol_version: responses-v1
+      endpoint_id: invalid-example-ark-endpoint-id
+    models: [invalid-example-ark-model]
+
+  - name: deepseek-bootstrap
+    kind: deepseek
+    enabled: false
+    credential: { env: DEEPSEEK_API_KEY }
+    evidence: { status: unverified }
+    deepseek:
+      base_url: https://api.deepseek.com
+      region: global
+      protocol_version: chat-completions-v1
+      endpoint: stable
     models: [deepseek-v4-flash, deepseek-v4-pro]
 
-routes:                             # 路由规则
-  - name: cheap
-    match: { model: deepseek-v4-flash }
+  - name: qwen-bootstrap
+    kind: qwen
+    enabled: false
+    credential: { env: DASHSCOPE_API_KEY }
+    evidence: { status: unverified }
+    qwen:
+      base_url: https://invalid-example-workspace-id.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+      region: cn-beijing
+      protocol_version: chat-completions-v1
+      workspace_id: invalid-example-workspace-id
+    models: [qwen3.7-flash]
+
+routes:
+  - name: invalid-bootstrap-route
+    match: { model: invalid-example-model }
     strategy: round_robin
-    targets: [{ provider: deepseek, model: deepseek-v4-flash }]
+    targets: [{ provider: legacy-invalid-example, model: invalid-example-model }]
 
 cache:
   enabled: true
@@ -182,7 +197,7 @@ rate_limit:
 
 ## 管理后台
 
-启动后访问 `http://localhost:8081/admin/dashboard/`，使用 admin 角色的 API Key 登录。
+启动后访问 `http://localhost:8081/admin/dashboard/`。默认安全示例没有预置 admin Key；只有在显式配置鉴权凭据后才能以 admin 身份调用管理 API。
 
 | 页面 | 功能 |
 | --- | --- |

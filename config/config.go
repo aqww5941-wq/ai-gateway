@@ -84,12 +84,64 @@ type TransportConfig struct {
 }
 
 type ProviderConfig struct {
-	Name    string        `yaml:"name"`
-	Type    string        `yaml:"type"`
-	APIKey  string        `yaml:"api_key"`
-	BaseURL string        `yaml:"base_url"`
-	Models  []string      `yaml:"models"`
-	Timeout time.Duration `yaml:"timeout"`
+	Name       string                  `yaml:"name"`
+	Kind       string                  `yaml:"kind,omitempty"`
+	Enabled    *bool                   `yaml:"enabled,omitempty"`
+	Credential ProviderCredentialRef   `yaml:"credential,omitempty"`
+	Evidence   ProviderEvidenceConfig  `yaml:"evidence,omitempty"`
+	Ark        *ArkProviderConfig      `yaml:"ark,omitempty"`
+	DeepSeek   *DeepSeekProviderConfig `yaml:"deepseek,omitempty"`
+	Qwen       *QwenProviderConfig     `yaml:"qwen,omitempty"`
+	Models     []string                `yaml:"models"`
+	Timeout    time.Duration           `yaml:"timeout"`
+
+	// Type, APIKey, and BaseURL preserve the current OpenAI/Claude adapter
+	// contract during the strangler migration. New native providers must use
+	// Kind plus their vendor-specific schema and may not populate these fields.
+	Type    string `yaml:"type,omitempty"`
+	APIKey  string `yaml:"api_key,omitempty"`
+	BaseURL string `yaml:"base_url,omitempty"`
+}
+
+// RuntimeEnabled distinguishes legacy adapters (which predate an enabled
+// field) from native bootstrap declarations. Native declarations are not
+// runnable until their dedicated adapters are implemented.
+func (p ProviderConfig) RuntimeEnabled() bool {
+	if p.Kind == "" {
+		return true
+	}
+	return p.Enabled != nil && *p.Enabled
+}
+
+// ProviderCredentialRef identifies a secret source without copying the
+// credential value into bootstrap configuration.
+type ProviderCredentialRef struct {
+	Env string `yaml:"env"`
+}
+
+type ProviderEvidenceConfig struct {
+	Status string `yaml:"status"`
+}
+
+type ArkProviderConfig struct {
+	BaseURL         string `yaml:"base_url"`
+	Region          string `yaml:"region"`
+	ProtocolVersion string `yaml:"protocol_version"`
+	EndpointID      string `yaml:"endpoint_id"`
+}
+
+type DeepSeekProviderConfig struct {
+	BaseURL         string `yaml:"base_url"`
+	Region          string `yaml:"region"`
+	ProtocolVersion string `yaml:"protocol_version"`
+	Endpoint        string `yaml:"endpoint"`
+}
+
+type QwenProviderConfig struct {
+	BaseURL         string `yaml:"base_url"`
+	Region          string `yaml:"region"`
+	ProtocolVersion string `yaml:"protocol_version"`
+	WorkspaceID     string `yaml:"workspace_id"`
 }
 
 type RouteConfig struct {

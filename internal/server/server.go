@@ -21,12 +21,12 @@ import (
 	"ai-gateway/internal/limiter"
 	"ai-gateway/internal/metrics"
 	"ai-gateway/internal/middleware"
-	"ai-gateway/internal/store"
 	"ai-gateway/internal/observer"
 	"ai-gateway/internal/provider"
 	"ai-gateway/internal/retry"
 	"ai-gateway/internal/router"
 	"ai-gateway/internal/static"
+	"ai-gateway/internal/store"
 	"ai-gateway/internal/tracing"
 )
 
@@ -39,10 +39,10 @@ type Server struct {
 	httpSrv       *http.Server
 	cacheBackend  cache.CacheBackend
 	semanticCache *cache.SemanticCache
-	keyLimiter   *limiter.TokenBucketLimiter
-	modelLimiter *limiter.TokenBucketLimiter
-	store        *store.Store
-	piiFilter    *filter.Filter
+	keyLimiter    *limiter.TokenBucketLimiter
+	modelLimiter  *limiter.TokenBucketLimiter
+	store         *store.Store
+	piiFilter     *filter.Filter
 
 	// Upstream connection pool shared by all providers.
 	transport *http.Transport
@@ -53,14 +53,14 @@ type Server struct {
 	// Resilience layer — one breaker per provider, one coalescer for the
 	// whole gateway, one shared retry policy. All three are nil-safe to
 	// disable, but they're always on in production.
-	breakers   *breaker.Manager
-	coalescer  *cache.Coalescer
+	breakers    *breaker.Manager
+	coalescer   *cache.Coalescer
 	retryPolicy retry.Policy
 }
 
 func New(cfg *config.Config, r *router.Router, provs map[string]provider.LLMProvider, logger *slog.Logger) (*Server, error) {
 	if len(provs) == 0 {
-		return nil, fmt.Errorf("no providers configured")
+		return nil, fmt.Errorf("no runnable providers configured: native bootstrap providers must remain disabled until their adapters are implemented")
 	}
 	s := &Server{
 		config:    cfg,
@@ -158,7 +158,7 @@ func New(cfg *config.Config, r *router.Router, provs map[string]provider.LLMProv
 		logger.Warn("store unavailable, key management disabled", "error", err)
 	} else {
 		s.store = st
-			st.StartAuditCleanup(logger, 30)
+		st.StartAuditCleanup(logger, 30)
 	}
 
 	// Seed keys from config on first run.
@@ -170,14 +170,13 @@ func New(cfg *config.Config, r *router.Router, provs map[string]provider.LLMProv
 		}
 	}
 
-
-		// PII / sensitive information filter.
-		if cfg.Filter.Enabled {
-			s.piiFilter = filter.New(cfg.Filter.Rules, filter.Mode(cfg.Filter.Mode))
-			if s.piiFilter != nil {
-				logger.Info("pii filter enabled", "mode", cfg.Filter.Mode, "rules", cfg.Filter.Rules)
-			}
+	// PII / sensitive information filter.
+	if cfg.Filter.Enabled {
+		s.piiFilter = filter.New(cfg.Filter.Rules, filter.Mode(cfg.Filter.Mode))
+		if s.piiFilter != nil {
+			logger.Info("pii filter enabled", "mode", cfg.Filter.Mode, "rules", cfg.Filter.Rules)
 		}
+	}
 	adminMux := s.adminRoutes()
 	mainMux := http.NewServeMux()
 	mainMux.HandleFunc("POST /v1/chat/completions", s.handleChatCompletion)
@@ -253,6 +252,9 @@ func (s *Server) Reload(cfg *config.Config) error {
 	// Build new providers
 	newProvs := make(map[string]provider.LLMProvider, len(cfg.Providers))
 	for _, pCfg := range cfg.Providers {
+		if !pCfg.RuntimeEnabled() {
+			continue
+		}
 		pLogger := s.logger.With("provider", pCfg.Name)
 		switch pCfg.Type {
 		case "openai":
@@ -270,6 +272,9 @@ func (s *Server) Reload(cfg *config.Config) error {
 		default:
 			return fmt.Errorf("unknown provider type %q for %q", pCfg.Type, pCfg.Name)
 		}
+	}
+	if len(newProvs) == 0 {
+		return fmt.Errorf("no runnable providers configured: native bootstrap providers must remain disabled until their adapters are implemented")
 	}
 
 	// Apply shared transport to new providers.
@@ -434,16 +439,16 @@ func (s *Server) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-		// Apply PII filter to response content before caching.
-		if s.piiFilter != nil && resp != nil {
-			for i := range resp.Choices {
-				cleaned, triggered, _ := s.piiFilter.Apply(resp.Choices[i].Message.Content)
-				if len(triggered) > 0 {
-					s.logger.Info("pii masked in response", "triggered", triggered)
-					resp.Choices[i].Message.Content = cleaned
-				}
+	// Apply PII filter to response content before caching.
+	if s.piiFilter != nil && resp != nil {
+		for i := range resp.Choices {
+			cleaned, triggered, _ := s.piiFilter.Apply(resp.Choices[i].Message.Content)
+			if len(triggered) > 0 {
+				s.logger.Info("pii masked in response", "triggered", triggered)
+				resp.Choices[i].Message.Content = cleaned
 			}
 		}
+	}
 
 	// Store in cache — use sfKey (computed before routing mutated req.Model)
 	// so lookup and storage always use the same key.
@@ -883,10 +888,10 @@ func (s *Server) handleStreamCompletion(w http.ResponseWriter, r *http.Request, 
 			}
 		}
 	}
-		// Audit log: successful stream request
-		totalTokens := promptTokens + completionTokens
-		s.auditLog(r, originalModel, usedTarget.Provider, promptTokens, completionTokens,
-			totalTokens, http.StatusOK, time.Since(streamStart).Milliseconds(), true, "")
+	// Audit log: successful stream request
+	totalTokens := promptTokens + completionTokens
+	s.auditLog(r, originalModel, usedTarget.Provider, promptTokens, completionTokens,
+		totalTokens, http.StatusOK, time.Since(streamStart).Milliseconds(), true, "")
 }
 
 // openStreamWithFallback walks the fallback chain trying each provider until

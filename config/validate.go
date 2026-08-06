@@ -2,6 +2,7 @@ package config
 
 import (
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +16,13 @@ var validFilterRules = map[string]struct{}{
 	"id_card_cn":  {},
 	"ipv4":        {},
 	"phone_cn":    {},
+}
+
+var environmentNamePattern = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+
+type providerDefinition struct {
+	models   map[string]struct{}
+	routable bool
 }
 
 // Validate checks the complete current bootstrap contract in deterministic
@@ -89,11 +97,11 @@ func validateServer(cfg ServerConfig) error {
 	return nil
 }
 
-func validateProviders(configs []ProviderConfig) (map[string]map[string]struct{}, error) {
+func validateProviders(configs []ProviderConfig) (map[string]providerDefinition, error) {
 	if len(configs) == 0 {
 		return nil, validationError("providers", "must contain at least one provider")
 	}
-	providers := make(map[string]map[string]struct{}, len(configs))
+	providers := make(map[string]providerDefinition, len(configs))
 	for i, cfg := range configs {
 		path := "providers[" + strconv.Itoa(i) + "]"
 		if err := validateName(path+".name", cfg.Name); err != nil {
@@ -102,19 +110,12 @@ func validateProviders(configs []ProviderConfig) (map[string]map[string]struct{}
 		if _, exists := providers[cfg.Name]; exists {
 			return nil, validationError(path+".name", "duplicates provider name %q", cfg.Name)
 		}
-		if cfg.Type != "openai" && cfg.Type != "claude" {
-			return nil, validationError(path+".type", "must be one of: openai, claude")
-		}
-		if cfg.APIKey == "" {
-			return nil, validationError(path+".api_key", "must not be empty")
-		}
-		if cfg.Type == "openai" && strings.TrimSpace(cfg.BaseURL) == "" {
-			return nil, validationError(path+".base_url", "must not be empty")
-		}
-		if cfg.BaseURL != "" {
-			if err := validateBaseURL(path+".base_url", cfg.BaseURL); err != nil {
+		if cfg.Kind == "" {
+			if err := validateLegacyProvider(path, cfg); err != nil {
 				return nil, err
 			}
+		} else if err := validateNativeProvider(path, cfg); err != nil {
+			return nil, err
 		}
 		if cfg.Timeout <= 0 {
 			return nil, validationError(path+".timeout", "must be greater than 0")
@@ -133,14 +134,143 @@ func validateProviders(configs []ProviderConfig) (map[string]map[string]struct{}
 			}
 			models[model] = struct{}{}
 		}
-		providers[cfg.Name] = models
+		providers[cfg.Name] = providerDefinition{models: models, routable: cfg.RuntimeEnabled()}
 	}
 	return providers, nil
 }
 
-func validateRoutes(configs []RouteConfig, providers map[string]map[string]struct{}) (map[string]struct{}, error) {
+func validateLegacyProvider(path string, cfg ProviderConfig) error {
+	if cfg.Enabled != nil || cfg.Credential.Env != "" || cfg.Evidence.Status != "" || cfg.Ark != nil || cfg.DeepSeek != nil || cfg.Qwen != nil {
+		return validationError(path+".kind", "must be set when using native provider fields")
+	}
+	if cfg.Type != "openai" && cfg.Type != "claude" {
+		return validationError(path+".type", "must be one of: openai, claude")
+	}
+	if cfg.APIKey == "" {
+		return validationError(path+".api_key", "must not be empty")
+	}
+	if cfg.Type == "openai" && strings.TrimSpace(cfg.BaseURL) == "" {
+		return validationError(path+".base_url", "must not be empty")
+	}
+	if cfg.BaseURL != "" {
+		return validateBaseURL(path+".base_url", cfg.BaseURL)
+	}
+	return nil
+}
+
+func validateNativeProvider(path string, cfg ProviderConfig) error {
+	if cfg.Type != "" || cfg.APIKey != "" || cfg.BaseURL != "" {
+		return validationError(path, "native provider kind must not use legacy type, api_key, or base_url fields")
+	}
+	if cfg.Enabled == nil {
+		return validationError(path+".enabled", "must be explicitly set to false while the native adapter is unavailable")
+	}
+	if *cfg.Enabled {
+		return validationError(path+".enabled", "adapter for provider kind %q is not implemented; set enabled to false", cfg.Kind)
+	}
+	if cfg.Evidence.Status != "unverified" {
+		return validationError(path+".evidence.status", "must be unverified while the native adapter is unavailable")
+	}
+	if !environmentNamePattern.MatchString(cfg.Credential.Env) {
+		return validationError(path+".credential.env", "must be an uppercase environment variable name")
+	}
+
+	switch cfg.Kind {
+	case "ark":
+		if cfg.Ark == nil {
+			return validationError(path+".ark", "must be configured for provider kind ark")
+		}
+		if cfg.DeepSeek != nil || cfg.Qwen != nil {
+			return validationError(path, "provider kind ark must not include deepseek or qwen configuration")
+		}
+		return validateArkProvider(path+".ark", *cfg.Ark)
+	case "deepseek":
+		if cfg.DeepSeek == nil {
+			return validationError(path+".deepseek", "must be configured for provider kind deepseek")
+		}
+		if cfg.Ark != nil || cfg.Qwen != nil {
+			return validationError(path, "provider kind deepseek must not include ark or qwen configuration")
+		}
+		return validateDeepSeekProvider(path+".deepseek", *cfg.DeepSeek)
+	case "qwen":
+		if cfg.Qwen == nil {
+			return validationError(path+".qwen", "must be configured for provider kind qwen")
+		}
+		if cfg.Ark != nil || cfg.DeepSeek != nil {
+			return validationError(path, "provider kind qwen must not include ark or deepseek configuration")
+		}
+		return validateQwenProvider(path+".qwen", *cfg.Qwen)
+	default:
+		return validationError(path+".kind", "must be one of: ark, deepseek, qwen")
+	}
+}
+
+func validateArkProvider(path string, cfg ArkProviderConfig) error {
+	if cfg.Region != "cn-beijing" {
+		return validationError(path+".region", "must be cn-beijing")
+	}
+	if cfg.ProtocolVersion != "responses-v1" && cfg.ProtocolVersion != "chat-completions-v1" {
+		return validationError(path+".protocol_version", "must be one of: chat-completions-v1, responses-v1")
+	}
+	if err := validateControlledURL(path+".base_url", cfg.BaseURL, "ark.cn-beijing.volces.com", "/api/v3"); err != nil {
+		return err
+	}
+	return validateName(path+".endpoint_id", cfg.EndpointID)
+}
+
+func validateDeepSeekProvider(path string, cfg DeepSeekProviderConfig) error {
+	if cfg.Region != "global" {
+		return validationError(path+".region", "must be global")
+	}
+	if cfg.ProtocolVersion != "chat-completions-v1" {
+		return validationError(path+".protocol_version", "must be chat-completions-v1")
+	}
+	expectedPath := ""
+	if cfg.Endpoint == "beta" {
+		expectedPath = "/beta"
+	} else if cfg.Endpoint != "stable" {
+		return validationError(path+".endpoint", "must be one of: beta, stable")
+	}
+	return validateControlledURL(path+".base_url", cfg.BaseURL, "api.deepseek.com", expectedPath)
+}
+
+func validateQwenProvider(path string, cfg QwenProviderConfig) error {
+	if cfg.Region != "cn-beijing" {
+		return validationError(path+".region", "must be cn-beijing")
+	}
+	if cfg.ProtocolVersion != "responses-v1" && cfg.ProtocolVersion != "chat-completions-v1" {
+		return validationError(path+".protocol_version", "must be one of: chat-completions-v1, responses-v1")
+	}
+	if err := validateName(path+".workspace_id", cfg.WorkspaceID); err != nil {
+		return err
+	}
+	host := cfg.WorkspaceID + ".cn-beijing.maas.aliyuncs.com"
+	return validateControlledURL(path+".base_url", cfg.BaseURL, host, "/compatible-mode/v1")
+}
+
+func validateControlledURL(path, raw, host, expectedPath string) error {
+	if err := validateBaseURL(path, raw); err != nil {
+		return err
+	}
+	parsed, _ := url.Parse(raw)
+	actualPath := strings.TrimSuffix(parsed.EscapedPath(), "/")
+	if !strings.EqualFold(parsed.Hostname(), host) || parsed.Port() != "" || actualPath != expectedPath {
+		return validationError(path, "must use the controlled endpoint https://%s%s", host, expectedPath)
+	}
+	if parsed.Scheme != "https" {
+		return validationError(path, "must use https")
+	}
+	return nil
+}
+
+func validateRoutes(configs []RouteConfig, providers map[string]providerDefinition) (map[string]struct{}, error) {
 	if len(configs) == 0 {
-		return nil, validationError("routes", "must contain at least one route")
+		for _, provider := range providers {
+			if provider.routable {
+				return nil, validationError("routes", "must contain at least one route for enabled providers")
+			}
+		}
+		return map[string]struct{}{}, nil
 	}
 	names := make(map[string]struct{}, len(configs))
 	models := make(map[string]struct{}, len(configs))
@@ -192,7 +322,7 @@ func validateRoutes(configs []RouteConfig, providers map[string]map[string]struc
 	return models, nil
 }
 
-func validateSemanticRules(path string, rules []SemanticRuleConfig, providers map[string]map[string]struct{}) error {
+func validateSemanticRules(path string, rules []SemanticRuleConfig, providers map[string]providerDefinition) error {
 	if len(rules) == 0 {
 		return validationError(path+".semantic_rules", "must contain simple and complex rules")
 	}
@@ -218,18 +348,21 @@ func validateSemanticRules(path string, rules []SemanticRuleConfig, providers ma
 	return nil
 }
 
-func validateTarget(path string, target RouteTarget, providers map[string]map[string]struct{}) error {
+func validateTarget(path string, target RouteTarget, providers map[string]providerDefinition) error {
 	if err := validateName(path+".provider", target.Provider); err != nil {
 		return err
 	}
-	models, exists := providers[target.Provider]
+	provider, exists := providers[target.Provider]
 	if !exists {
 		return validationError(path+".provider", "references unknown provider %q", target.Provider)
+	}
+	if !provider.routable {
+		return validationError(path+".provider", "references disabled provider %q", target.Provider)
 	}
 	if err := validateName(path+".model", target.Model); err != nil {
 		return err
 	}
-	if _, exists := models[target.Model]; !exists {
+	if _, exists := provider.models[target.Model]; !exists {
 		return validationError(path+".model", "references model %q not declared by provider %q", target.Model, target.Provider)
 	}
 	if target.Weight < 0 {
