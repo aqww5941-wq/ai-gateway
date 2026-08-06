@@ -222,8 +222,8 @@ func New(cfg *config.Config, r *router.Router, provs map[string]provider.LLMProv
 	s.httpSrv = &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
 		Handler:      handler,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 120 * time.Second,
+		ReadTimeout:  cfg.Server.ReadTimeout,
+		WriteTimeout: cfg.Server.WriteTimeout,
 	}
 	return s, nil
 }

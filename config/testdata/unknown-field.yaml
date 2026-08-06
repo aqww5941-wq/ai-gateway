@@ -1,0 +1,13 @@
+server:
+  mystery_timeout: 5s
+providers:
+  - name: primary
+    type: openai
+    api_key: not-a-real-key
+    base_url: https://example.invalid/v1
+    models: [model-a]
+routes:
+  - name: default
+    match: {model: model-a}
+    strategy: round_robin
+    targets: [{provider: primary, model: model-a}]

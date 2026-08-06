@@ -72,7 +72,7 @@ v3 设计定义“最终要成为什么”，本任务书定义“从当前代�
 
 | 阶段 | Task | 结果 | 主线状态 |
 | --- | --- | --- | --- |
-| M0 可信基线 | 1～10 | 构建、配置、安全、测试和 CI 可信 | Task 1～2 Done；Task 3 Ready |
+| M0 可信基线 | 1～10 | 构建、配置、安全、测试和 CI 可信 | Task 1～3 Done；Task 4 Ready |
 | M1 Gin 与应用边界 | 11～18 | 双平面 Gin，核心与框架解耦 | Pending |
 | M2 Canonical 与双 Ingress | 19～27 | Chat/Responses 进入同一语义模型 | Pending |
 | M3 国内三厂商 | 28～36 | 方舟、DeepSeek、Qwen 可合约与真实验证 | Pending |
@@ -108,7 +108,7 @@ v3 设计定义“最终要成为什么”，本任务书定义“从当前代�
 
 ### Task 3：建立严格配置加载、默认值与校验契约
 
-- **状态：** Ready
+- **状态：** Done
 - **依赖：** Task 2
 - **目标：** 无效配置在启动/发布边界明确失败，而不是以零值或未知字段继续运行。
 - **交付：** `KnownFields` 严格解析、集中默认值、字段范围和交叉引用校验、缺失环境变量检测、稳定错误分类；补齐当前 YAML 与 Go Struct 不一致字段。
@@ -118,7 +118,7 @@ v3 设计定义“最终要成为什么”，本任务书定义“从当前代�
 
 ### Task 4：清理秘密示例并收敛 Bootstrap Provider 配置
 
-- **状态：** Pending
+- **状态：** Ready
 - **依赖：** Task 3
 - **目标：** 示例配置不能看似携带可用 Key，也不能把未验证厂商写成已支持。
 - **交付：** 无效占位 Key、环境变量 Secret reference、Ark/DeepSeek/Qwen 独立 provider kind 的 Bootstrap Schema；删除首批范围外的默认路由声明。

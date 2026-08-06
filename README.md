@@ -123,6 +123,9 @@ Upstream LLM APIs
 
 `config/gateway.yaml` 是单一配置源，主要区块：
 
+配置加载会拒绝未知字段、缺失环境变量、非法范围和悬空路由引用；默认值与完整约束见
+[`docs/configuration.md`](docs/configuration.md)。
+
 ```yaml
 server:
   port: 8081

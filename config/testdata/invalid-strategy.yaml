@@ -1,0 +1,11 @@
+providers:
+  - name: primary
+    type: openai
+    api_key: not-a-real-key
+    base_url: https://example.invalid/v1
+    models: [model-a]
+routes:
+  - name: default
+    match: {model: model-a}
+    strategy: random
+    targets: [{provider: primary, model: model-a}]

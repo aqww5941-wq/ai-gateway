@@ -1,0 +1,2 @@
+config parse error at document: yaml: unmarshal errors:
+  line 2: field mystery_timeout not found in type config.ServerConfig

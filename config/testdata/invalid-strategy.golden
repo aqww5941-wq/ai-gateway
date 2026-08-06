@@ -1,0 +1,1 @@
+config validation error at routes[0].strategy: must be one of: fallback, latency, round_robin, semantic, weighted

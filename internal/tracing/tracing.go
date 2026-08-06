@@ -42,7 +42,7 @@ type Config struct {
 	// "ai-gateway".
 	ServiceName string
 
-	// SampleRatio: 0..1. 1.0 = sample every span, 0.1 = ~10%. Defaults to 1.0
+	// SampleRatio: (0,1]. 1.0 = sample every span, 0.1 = ~10%. Defaults to 1.0
 	// because the gateway's per-request volume is modest and SREs typically
 	// want full traces during incident debugging.
 	SampleRatio float64

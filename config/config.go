@@ -1,12 +1,6 @@
 package config
 
-import (
-	"fmt"
-	"os"
-	"time"
-
-	"gopkg.in/yaml.v3"
-)
+import "time"
 
 type Config struct {
 	Server    ServerConfig     `yaml:"server"`
@@ -14,7 +8,7 @@ type Config struct {
 	Providers []ProviderConfig `yaml:"providers"`
 	Routes    []RouteConfig    `yaml:"routes"`
 	RateLimit RateLimitConfig  `yaml:"rate_limit"`
-	Quota     QuotaConfig       `yaml:"quota"`
+	Quota     QuotaConfig      `yaml:"quota"`
 	Cache     CacheConfig      `yaml:"cache"`
 	Tracing   TracingConfig    `yaml:"tracing"`
 	Filter    FilterConfig     `yaml:"filter"`
@@ -22,18 +16,18 @@ type Config struct {
 
 // FilterConfig controls PII / sensitive information filtering.
 type FilterConfig struct {
-	Enabled bool      `yaml:"enabled"`
-	Mode    string    `yaml:"mode"`    // "mask" or "block"
-	Rules   []string  `yaml:"rules"`   // enabled rule names: phone_cn, id_card_cn, email, credit_card, ipv4, api_key, cn_name
+	Enabled bool     `yaml:"enabled"`
+	Mode    string   `yaml:"mode"`  // "mask" or "block"
+	Rules   []string `yaml:"rules"` // enabled rule names: phone_cn, id_card_cn, email, credit_card, ipv4, api_key, cn_name
 }
 
 // TracingConfig configures OpenTelemetry tracing. All fields are optional; the
 // zero value disables tracing entirely.
 type TracingConfig struct {
 	Enabled     bool    `yaml:"enabled"`
-	Exporter    string  `yaml:"exporter"`     // "stdout" or "otlp"
+	Exporter    string  `yaml:"exporter"` // "stdout" or "otlp"
 	ServiceName string  `yaml:"service_name"`
-	SampleRatio float64 `yaml:"sample_ratio"` // 0..1, 1 = sample everything
+	SampleRatio float64 `yaml:"sample_ratio"` // (0,1], 1 = sample everything
 }
 
 type KeyConfig struct {
@@ -50,8 +44,8 @@ type AuthConfig struct {
 }
 
 type QuotaConfig struct {
-	Enabled       bool `yaml:"enabled"`
-	ResetHourUTC  int  `yaml:"reset_hour_utc"`
+	Enabled      bool `yaml:"enabled"`
+	ResetHourUTC int  `yaml:"reset_hour_utc"`
 }
 
 type RateLimitConfig struct {
@@ -61,19 +55,21 @@ type RateLimitConfig struct {
 }
 
 type CacheConfig struct {
-	Enabled    bool    `yaml:"enabled"`
-	Backend    string  `yaml:"backend"`
-	TTL        string  `yaml:"ttl"`
-	Strategy   string  `yaml:"strategy"`
-	MaxSize    int     `yaml:"max_size"`
-	Threshold  float64 `yaml:"threshold"`
-	RedisAddr  string  `yaml:"redis_addr"`
-	RedisPass  string  `yaml:"redis_pass"`
-	RedisDB    int     `yaml:"redis_db"`
+	Enabled   bool    `yaml:"enabled"`
+	Backend   string  `yaml:"backend"`
+	TTL       string  `yaml:"ttl"`
+	Strategy  string  `yaml:"strategy"`
+	MaxSize   int     `yaml:"max_size"`
+	Threshold float64 `yaml:"threshold"`
+	RedisAddr string  `yaml:"redis_addr"`
+	RedisPass string  `yaml:"redis_pass"`
+	RedisDB   int     `yaml:"redis_db"`
 }
 
 type ServerConfig struct {
 	Port           int             `yaml:"port"`
+	ReadTimeout    time.Duration   `yaml:"read_timeout"`
+	WriteTimeout   time.Duration   `yaml:"write_timeout"`
 	DBPath         string          `yaml:"db_path"`
 	MaxConcurrency int             `yaml:"max_concurrency"`
 	QueueSize      int             `yaml:"queue_size"`
@@ -117,20 +113,4 @@ type RouteTarget struct {
 type SemanticRuleConfig struct {
 	Complexity string      `yaml:"complexity"`
 	Target     RouteTarget `yaml:"target"`
-}
-
-func Load(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read config: %w", err)
-	}
-
-	expanded := os.ExpandEnv(string(data))
-
-	var cfg Config
-	if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
-	}
-
-	return &cfg, nil
 }
