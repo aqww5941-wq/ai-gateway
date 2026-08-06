@@ -72,7 +72,7 @@ v3 设计定义“最终要成为什么”，本任务书定义“从当前代�
 
 | 阶段 | Task | 结果 | 主线状态 |
 | --- | --- | --- | --- |
-| M0 可信基线 | 1～10 | 构建、配置、安全、测试和 CI 可信 | Task 1～9 Done；Task 10 Ready |
+| M0 可信基线 | 1～10 | 构建、配置、安全、测试和 CI 可信 | Task 1～9 Done；Task 10 In Progress |
 | M1 Gin 与应用边界 | 11～18 | 双平面 Gin，核心与框架解耦 | Pending |
 | M2 Canonical 与双 Ingress | 19～27 | Chat/Responses 进入同一语义模型 | Pending |
 | M3 国内三厂商 | 28～36 | 方舟、DeepSeek、Qwen 可合约与真实验证 | Pending |
@@ -189,13 +189,24 @@ v3 设计定义“最终要成为什么”，本任务书定义“从当前代�
 
 ### Task 10：执行 M0 Exit Gate
 
-- **状态：** Ready
+- **状态：** In Progress（全新检出 Gate 执行中）
 - **依赖：** Task 1～Task 9
 - **目标：** 证明仓库已经具备安全开始架构迁移的可信地基。
 - **交付：** `docs/gates/M0.md`，记录环境、命令、结果、残余风险和下一阶段许可。
 - **验收：** 全新检出可构建启动；CI 全绿；构建不污染工作树；Config/Store/Provider/Server/Reload 有保护测试；无固定演示秘密。
 - **验证：** M0 全量 CI 命令、race、Secret Scan、启动/readiness Smoke。
 - **不包含：** M1 功能；Gate 失败不得通过修改报告改成成功。
+
+### Task 10.R1：固定跨平台 Golden Fixture 换行契约
+
+- **状态：** Done
+- **依赖：** Task 10 全新 Windows 检出 Gate
+- **根因：** `config/testdata/*.golden` 没有 EOL 契约；Windows `core.autocrlf=true` 将全新检出的 Fixture 转为 CRLF，而运行时错误使用 LF，导致精确 Golden 比较只在全新 Windows 工作树失败。
+- **目标：** 让 Golden 表达诊断文本而不携带主机换行差异。
+- **交付：** `.gitattributes` 将 `*.golden` 固定为 LF；不放宽断言，不改写期望错误。
+- **验收：** 全新 Windows 检出的 Golden 不含 CR；`TestLoadErrorGolden` 与全仓测试通过。
+- **验证：** `git check-attr`、字节级 EOL 检查、`go test -count=1 ./config`、新建 detached worktree 重跑 M0 Gate。
+- **不包含：** 全仓换行迁移或修改 Golden 语义。
 
 ---
 
