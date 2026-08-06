@@ -72,7 +72,7 @@ v3 设计定义“最终要成为什么”，本任务书定义“从当前代�
 
 | 阶段 | Task | 结果 | 主线状态 |
 | --- | --- | --- | --- |
-| M0 可信基线 | 1～10 | 构建、配置、安全、测试和 CI 可信 | Task 1～6 Done；Task 7 Ready |
+| M0 可信基线 | 1～10 | 构建、配置、安全、测试和 CI 可信 | Task 1～7 Done；Task 8 Ready |
 | M1 Gin 与应用边界 | 11～18 | 双平面 Gin，核心与框架解耦 | Pending |
 | M2 Canonical 与双 Ingress | 19～27 | Chat/Responses 进入同一语义模型 | Pending |
 | M3 国内三厂商 | 28～36 | 方舟、DeepSeek、Qwen 可合约与真实验证 | Pending |
@@ -148,7 +148,7 @@ v3 设计定义“最终要成为什么”，本任务书定义“从当前代�
 
 ### Task 7：为旧 Provider 与 Server 建立端到端回归夹具
 
-- **状态：** Ready
+- **状态：** Done
 - **依赖：** Task 1
 - **目标：** 在迁移 Gin/Canonical 前锁定当前 Chat、SSE、错误和取消行为。
 - **交付：** `httptest.Server` 上游、Unary/SSE Fixture、Auth/Route/Retry/Fallback/取消测试、脱敏测试数据。
@@ -158,7 +158,7 @@ v3 设计定义“最终要成为什么”，本任务书定义“从当前代�
 
 ### Task 8：建立后端与前端质量门禁
 
-- **状态：** Pending
+- **状态：** Ready
 - **依赖：** Task 2、Task 3、Task 6、Task 7
 - **目标：** 所有后续 Task 有自动、可重复的最低质量门槛。
 - **交付：** CI 工作流；Go format/test/race/vet/build、静态分析、Secret Scan；前端 lint/test/build 脚本和最小测试框架；依赖缓存不影响正确性。
