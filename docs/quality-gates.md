@@ -79,4 +79,4 @@ go run github.com/zricethezav/gitleaks/v8@v8.27.2 dir . --no-banner --redact
 - `[通过]` 负向 Build Probe：合成 TypeScript 类型错误使前端 Build 返回非零。
 - `[通过]` 负向 Secret Probe：无效高熵合成 Credential 使 Gitleaks 返回非零且输出脱敏。
 - `[通过]` 全仓 Test/Race/Vet/Staticcheck/Build、干净 `npm ci`、生成产物差异与最终 Gitleaks。
-- `[待外部证据]` GitHub-hosted `Quality` Workflow 首次成功运行。当前 `master` 比 `origin/master` 超前多个本地提交，项目规则默认不 push；取得明确 push 授权并完成远端运行前，Task 8 保持 In Progress，Task 9 不释放。
+- `[通过]` GitHub-hosted [`Quality` Workflow 首次运行](https://github.com/aqww5941-wq/ai-gateway/actions/runs/31079697194)：2026-08-06 在 `b1e88d2` 上完成，Go quality、Frontend quality 和 Secret scan 三个 Job 均为 `success`。Task 8 验收完成，Task 9 释放为 Ready。

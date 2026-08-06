@@ -21,7 +21,7 @@ Staticcheck 基线还暴露两处具体问题：构建助手优先依赖已弃�
 
 Gateway API、配置、数据库和运行时请求语义不变。Retry 修改语义等价；构建助手仍支持当前 PATH 缺失但由绝对 Go 路径启动的 Windows 环境。新增 npm 包均为 devDependency，不进入浏览器生产 Bundle；Staticcheck、Actionlint 和 Gitleaks 不写入项目 `go.mod`。
 
-Task 8 当前保持 `In Progress`：本地正向/负向门禁已通过，但 `master` 比远端超前多个提交，且项目规则默认不 push。没有 GitHub-hosted Workflow 首次成功记录前，不把 Task 8 或 Task 9 标记为 Done/Ready。
+Task 8 的本地正向/负向门禁通过后，经用户明确授权推送。GitHub-hosted `Quality` Workflow 已在提交 `b1e88d2` 上首次成功，因此 Task 8 标记为 `Done`，Task 9 释放为 `Ready`。
 
 ## 可观测性
 
@@ -40,7 +40,7 @@ Task 8 当前保持 `In Progress`：本地正向/负向门禁已通过，但 `ma
 - `[通过]` 干净 `npm ci` 后 `npm run quality`；2 个测试文件/6 个测试通过。
 - `[通过]` 前端 Build 后 `git diff --exit-code -- internal/static/dist`，无生成产物变化。
 - `[通过]` 全仓 Gitleaks 与 `git diff --check`。
-- `[待外部验证]` GitHub-hosted `Quality` Workflow 首次成功运行；未 push，不伪造结果。
+- `[通过]` GitHub-hosted [`Quality` Workflow 首次运行](https://github.com/aqww5941-wq/ai-gateway/actions/runs/31079697194)：Go quality、Frontend quality 和 Secret scan 三个 Job 均为 `success`。
 
 ## 风险与回滚
 

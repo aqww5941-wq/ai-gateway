@@ -72,7 +72,7 @@ v3 设计定义“最终要成为什么”，本任务书定义“从当前代�
 
 | 阶段 | Task | 结果 | 主线状态 |
 | --- | --- | --- | --- |
-| M0 可信基线 | 1～10 | 构建、配置、安全、测试和 CI 可信 | Task 1～7 Done；Task 8 In Progress（等待首次远端 CI） |
+| M0 可信基线 | 1～10 | 构建、配置、安全、测试和 CI 可信 | Task 1～8 Done；Task 9 Ready |
 | M1 Gin 与应用边界 | 11～18 | 双平面 Gin，核心与框架解耦 | Pending |
 | M2 Canonical 与双 Ingress | 19～27 | Chat/Responses 进入同一语义模型 | Pending |
 | M3 国内三厂商 | 28～36 | 方舟、DeepSeek、Qwen 可合约与真实验证 | Pending |
@@ -158,7 +158,7 @@ v3 设计定义“最终要成为什么”，本任务书定义“从当前代�
 
 ### Task 8：建立后端与前端质量门禁
 
-- **状态：** In Progress（本地门禁通过，等待首次远端 CI）
+- **状态：** Done
 - **依赖：** Task 2、Task 3、Task 6、Task 7
 - **目标：** 所有后续 Task 有自动、可重复的最低质量门槛。
 - **交付：** CI 工作流；Go format/test/race/vet/build、静态分析、Secret Scan；前端 lint/test/build 脚本和最小测试框架；依赖缓存不影响正确性。
@@ -179,7 +179,7 @@ v3 设计定义“最终要成为什么”，本任务书定义“从当前代�
 
 ### Task 9：校准 README、运行说明与事实等级
 
-- **状态：** Pending
+- **状态：** Ready
 - **依赖：** Task 2～Task 8
 - **目标：** 对外说明与当前可验证能力一致。
 - **交付：** README 的 Implemented/Planned/Unverified 能力表、跨平台启动、配置/Secret、已知限制和 v3 路线链接。
